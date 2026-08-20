@@ -1,0 +1,15 @@
+{
+  "name": "byak-ai",
+  "private": true,
+  "version": "0.1.0",
+  "description": "BYAK AI — Bring Your API Key multi-provider AI assistant",
+  "scripts": {
+    "dev": "node --watch backend/src/server.mjs",
+    "start": "node backend/src/server.mjs",
+    "test": "node --test backend/test/*.test.mjs",
+    "check": "node --check backend/src/server.mjs && node --test backend/test/*.test.mjs"
+  },
+  "engines": { "node": ">=22" },
+  "license": "PROPRIETARY"
+}
+

@@ -1,0 +1,8 @@
+<resources>
+    <style name="Theme.BYAKAI" parent="android:style/Theme.Material.Light.NoActionBar">
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:statusBarColor">#0A0B10</item>
+        <item name="android:navigationBarColor">#0A0B10</item>
+    </style>
+</resources>
+

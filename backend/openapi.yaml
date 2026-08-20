@@ -1,0 +1,40 @@
+openapi: 3.1.0
+info: { title: BYAK AI API, version: 0.1.0 }
+servers: [{ url: https://api.example.com }]
+security: [{ bearerAuth: [] }]
+components:
+  securitySchemes:
+    bearerAuth: { type: http, scheme: bearer, bearerFormat: JWT }
+  schemas:
+    Error: { type: object, properties: { error: { type: object, properties: { code: { type: string }, message: { type: string }, requestId: { type: string } } } } }
+paths:
+  /health:
+    get: { security: [], responses: { '200': { description: Healthy } } }
+  /v1/auth/register:
+    post: { security: [], requestBody: { required: true, content: { application/json: { schema: { type: object, required: [email,password], properties: { name: { type: string }, email: { type: string, format: email }, password: { type: string, minLength: 10 } } } } } }, responses: { '201': { description: Session created }, '409': { description: Existing account } } }
+  /v1/auth/login:
+    post: { security: [], responses: { '200': { description: Authenticated }, '401': { description: Invalid credentials } } }
+  /v1/providers:
+    get: { responses: { '200': { description: Masked provider connections } } }
+    post: { responses: { '201': { description: Encrypted provider connection created } } }
+  /v1/conversations:
+    get: { responses: { '200': { description: Conversations } } }
+    post: { responses: { '201': { description: Conversation created } } }
+  /v1/conversations/{id}/stream:
+    post:
+      parameters: [{ name: id, in: path, required: true, schema: { type: string, format: uuid } }]
+      responses: { '200': { description: SSE stream, content: { text/event-stream: {} } } }
+  /v1/projects:
+    get: { responses: { '200': { description: Projects } } }
+    post: { responses: { '201': { description: Project created } } }
+  /v1/files:
+    get: { responses: { '200': { description: Files } } }
+    post: { responses: { '201': { description: File processed }, '415': { description: Unsupported type } } }
+  /v1/research:
+    post: { responses: { '200': { description: Source-attributed results } } }
+  /v1/subscription:
+    get: { responses: { '200': { description: Verified entitlement } } }
+  /v1/me:
+    get: { responses: { '200': { description: Current user } } }
+    delete: { responses: { '200': { description: Account deleted } } }
+
