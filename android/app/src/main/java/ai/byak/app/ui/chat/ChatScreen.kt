@@ -1,5 +1,9 @@
 package ai.byak.app.ui.chat
 
+import android.content.Intent
+import android.speech.RecognizerIntent
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -19,6 +23,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -27,9 +32,12 @@ import androidx.compose.material.icons.outlined.ArrowUpward
 import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material.icons.outlined.Build
 import androidx.compose.material.icons.outlined.ChatBubbleOutline
+import androidx.compose.material.icons.outlined.ContentCopy
 import androidx.compose.material.icons.outlined.Memory
+import androidx.compose.material.icons.outlined.Mic
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.Settings
+import androidx.compose.material.icons.outlined.Share
 import androidx.compose.material.icons.outlined.Stop
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilledIconButton
@@ -46,14 +54,16 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -63,11 +73,19 @@ import ai.byak.app.domain.model.ChatMessage
 import ai.byak.app.domain.model.MessageRole
 import ai.byak.app.ui.components.ByakLogo
 import ai.byak.app.ui.theme.GlassCard
+import java.util.Locale
 
 @Composable
 fun ChatScreen(viewModel: ChatViewModel, openSettings: () -> Unit) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val snackbar = remember { SnackbarHostState() }
+    var draft by rememberSaveable { mutableStateOf("") }
+    val voiceLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+        result.data?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)
+            ?.firstOrNull()
+            ?.takeIf(String::isNotBlank)
+            ?.let { recognized -> draft = recognized }
+    }
     LaunchedEffect(viewModel) {
         viewModel.effects.collect { if (it is ChatEffect.Error) snackbar.showSnackbar(it.message) }
     }
@@ -98,8 +116,30 @@ fun ChatScreen(viewModel: ChatViewModel, openSettings: () -> Unit) {
             if (state.activeConversationId == null) {
                 Welcome(state, viewModel, openSettings, Modifier.weight(1f))
             } else {
-                Conversation(state, viewModel, Modifier.weight(1f))
+                Conversation(state, Modifier.weight(1f))
             }
+            ChatComposer(
+                draft = draft,
+                onDraftChange = { draft = it },
+                state = state,
+                send = {
+                    val message = draft.trim()
+                    if (message.isNotEmpty()) {
+                        draft = ""
+                        viewModel.send(message)
+                    }
+                },
+                stop = viewModel::stop,
+                startVoice = {
+                    voiceLauncher.launch(
+                        Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+                            putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+                            putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.getDefault().toLanguageTag())
+                            putExtra(RecognizerIntent.EXTRA_PROMPT, "Speak to BYAK")
+                        },
+                    )
+                },
+            )
         }
     }
 }
@@ -118,7 +158,7 @@ private fun Welcome(state: ChatUiState, viewModel: ChatViewModel, openSettings: 
     ) {
         item {
             Text("What are we working on?", fontSize = 31.sp, lineHeight = 36.sp, fontWeight = FontWeight.Black)
-            Text("Ask naturally. BYAK keeps the interface quiet and does the complicated work underneath.", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 16.sp)
+            Text("Type, speak, or choose a starting point. BYAK keeps the interface quiet and does the complicated work underneath.", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 16.sp)
             Spacer(Modifier.height(14.dp))
         }
         if (!state.providerReady) {
@@ -168,41 +208,54 @@ private fun Welcome(state: ChatUiState, viewModel: ChatViewModel, openSettings: 
 }
 
 @Composable
-private fun Conversation(state: ChatUiState, viewModel: ChatViewModel, modifier: Modifier) {
-    var draft by remember { mutableStateOf("") }
-    Column(modifier) {
-        LazyColumn(
-            Modifier.weight(1f).fillMaxWidth(),
-            contentPadding = PaddingValues(horizontal = 14.dp, vertical = 12.dp),
-            verticalArrangement = Arrangement.spacedBy(13.dp),
+private fun Conversation(state: ChatUiState, modifier: Modifier) {
+    val listState = rememberLazyListState()
+    val lastLength = state.messages.lastOrNull()?.content?.length ?: 0
+    LaunchedEffect(state.messages.size, lastLength) {
+        if (state.messages.isNotEmpty()) listState.animateScrollToItem(state.messages.lastIndex)
+    }
+    LazyColumn(
+        modifier = modifier.fillMaxWidth(),
+        state = listState,
+        contentPadding = PaddingValues(horizontal = 14.dp, vertical = 12.dp),
+        verticalArrangement = Arrangement.spacedBy(13.dp),
+    ) {
+        items(state.messages, key = { it.id }) { message -> MessageBubble(message) }
+    }
+}
+
+@Composable
+private fun ChatComposer(
+    draft: String,
+    onDraftChange: (String) -> Unit,
+    state: ChatUiState,
+    send: () -> Unit,
+    stop: () -> Unit,
+    startVoice: () -> Unit,
+) {
+    Surface(color = MaterialTheme.colorScheme.surface, tonalElevation = 4.dp) {
+        Row(
+            Modifier.fillMaxWidth().navigationBarsPadding().padding(12.dp),
+            verticalAlignment = Alignment.Bottom,
         ) {
-            items(state.messages, key = { it.id }) { message -> MessageBubble(message) }
-        }
-        Surface(color = MaterialTheme.colorScheme.surface, tonalElevation = 4.dp) {
-            Row(
-                Modifier.fillMaxWidth().navigationBarsPadding().padding(12.dp),
-                verticalAlignment = Alignment.Bottom,
+            IconButton(onClick = startVoice, enabled = !state.generating) { Icon(Icons.Outlined.Mic, "Voice input") }
+            OutlinedTextField(
+                value = draft,
+                onValueChange = onDraftChange,
+                modifier = Modifier.weight(1f),
+                placeholder = { Text(if (state.providerReady) "Message BYAK…" else "Connect an AI provider first") },
+                minLines = 1,
+                maxLines = 6,
+                shape = RoundedCornerShape(24.dp),
+                enabled = !state.generating,
+            )
+            Spacer(Modifier.width(8.dp))
+            FilledIconButton(
+                onClick = { if (state.generating) stop() else send() },
+                enabled = state.generating || (draft.isNotBlank() && state.providerReady),
+                modifier = Modifier.size(52.dp),
             ) {
-                OutlinedTextField(
-                    value = draft,
-                    onValueChange = { draft = it },
-                    modifier = Modifier.weight(1f),
-                    placeholder = { Text("Message BYAK…") },
-                    minLines = 1,
-                    maxLines = 6,
-                    shape = RoundedCornerShape(24.dp),
-                )
-                Spacer(Modifier.width(8.dp))
-                FilledIconButton(
-                    onClick = {
-                        if (state.generating) viewModel.stop()
-                        else draft.trim().takeIf(String::isNotEmpty)?.let { text -> draft = ""; viewModel.send(text) }
-                    },
-                    enabled = state.generating || (draft.isNotBlank() && state.providerReady),
-                    modifier = Modifier.size(52.dp),
-                ) {
-                    Icon(if (state.generating) Icons.Outlined.Stop else Icons.Outlined.ArrowUpward, if (state.generating) "Stop" else "Send")
-                }
+                Icon(if (state.generating) Icons.Outlined.Stop else Icons.Outlined.ArrowUpward, if (state.generating) "Stop" else "Send")
             }
         }
     }
@@ -211,6 +264,8 @@ private fun Conversation(state: ChatUiState, viewModel: ChatViewModel, modifier:
 @Composable
 private fun MessageBubble(message: ChatMessage) {
     val user = message.role == MessageRole.USER
+    val context = LocalContext.current
+    val clipboard = LocalClipboardManager.current
     Row(Modifier.fillMaxWidth(), horizontalArrangement = if (user) Arrangement.End else Arrangement.Start) {
         if (!user) {
             ByakLogo(32.dp)
@@ -230,6 +285,24 @@ private fun MessageBubble(message: ChatMessage) {
                 } else {
                     Text(message.content, lineHeight = 22.sp)
                     if (message.streaming) Text("●", color = MaterialTheme.colorScheme.secondary, fontSize = 11.sp)
+                    if (!user && !message.streaming && message.content.isNotBlank()) {
+                        Row(Modifier.align(Alignment.End)) {
+                            IconButton(onClick = { clipboard.setText(AnnotatedString(message.content)) }) {
+                                Icon(Icons.Outlined.ContentCopy, "Copy response", Modifier.size(18.dp))
+                            }
+                            IconButton(onClick = {
+                                context.startActivity(
+                                    Intent.createChooser(
+                                        Intent(Intent.ACTION_SEND).apply {
+                                            type = "text/plain"
+                                            putExtra(Intent.EXTRA_TEXT, message.content)
+                                        },
+                                        "Share BYAK response",
+                                    ),
+                                )
+                            }) { Icon(Icons.Outlined.Share, "Share response", Modifier.size(18.dp)) }
+                        }
+                    }
                 }
             }
         }
