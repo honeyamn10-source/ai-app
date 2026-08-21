@@ -141,7 +141,7 @@ private fun FriendlyChatScreen(state: UiState, vm: ByakViewModel, openModels: ()
                 }
             }
             Spacer(Modifier.weight(1f))
-            IconButton(onClick = vm::newConversation, enabled = state.providers.isNotEmpty()) { Icon(Icons.Outlined.EditSquare, "New chat") }
+            IconButton(onClick = vm::newConversation, enabled = state.providers.isNotEmpty()) { Icon(Icons.Outlined.AddComment, "New chat") }
         }
 
         if (conversation == null) ChatWelcome(state, vm, openModels) else ConversationView(state, vm)
