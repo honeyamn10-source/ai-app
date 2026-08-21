@@ -55,6 +55,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.mutableStateOf
@@ -74,11 +75,14 @@ import ai.byak.app.domain.model.MessageRole
 import ai.byak.app.ui.components.ByakLogo
 import ai.byak.app.ui.theme.GlassCard
 import java.util.Locale
+import kotlinx.coroutines.launch
 
 @Composable
 fun ChatScreen(viewModel: ChatViewModel, openSettings: () -> Unit) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val snackbar = remember { SnackbarHostState() }
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     var draft by rememberSaveable { mutableStateOf("") }
     val voiceLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
         result.data?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)
@@ -131,13 +135,13 @@ fun ChatScreen(viewModel: ChatViewModel, openSettings: () -> Unit) {
                 },
                 stop = viewModel::stop,
                 startVoice = {
-                    voiceLauncher.launch(
-                        Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
-                            putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-                            putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.getDefault().toLanguageTag())
-                            putExtra(RecognizerIntent.EXTRA_PROMPT, "Speak to BYAK")
-                        },
-                    )
+                    val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+                        putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+                        putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.getDefault().toLanguageTag())
+                        putExtra(RecognizerIntent.EXTRA_PROMPT, "Speak to BYAK")
+                    }
+                    if (intent.resolveActivity(context.packageManager) != null) voiceLauncher.launch(intent)
+                    else scope.launch { snackbar.showSnackbar("Voice input is not available on this device") }
                 },
             )
         }
