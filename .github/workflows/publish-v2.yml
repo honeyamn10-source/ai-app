@@ -15,6 +15,11 @@ jobs:
   publish:
     runs-on: ubuntu-latest
     steps:
+      - name: Check out delivery branch
+        uses: actions/checkout@v4
+        with:
+          ref: automation/publish-byak-v2
+
       - name: Download verified Android artifacts
         env:
           GH_TOKEN: ${{ github.token }}
@@ -41,3 +46,16 @@ jobs:
           else
             gh release create v2.0.0-beta --repo honeyamn10-source/ai-app --target c22b2951857e99117768be7be0c575fa53ebd083 --prerelease --title "BYAK AI v2.0.0 Beta" --notes "Verified production-architecture beta. CI run 32460884715 passed Android tests, release lint, APK/AAB packaging, backend tests, and security checks." BYAK-AI-v2.0.0-debug.apk BYAK-AI-v2.0.0-release.aab BYAK-AI-v2.0.0-SHA256.txt
           fi
+
+      - name: Record successful delivery
+        run: |
+          mkdir -p delivery
+          printf '%s\n' '{"status":"published","tag":"v2.0.0-beta","source_commit":"c22b2951857e99117768be7be0c575fa53ebd083","verified_run":32460884715}' > delivery/BYAK-v2-release.json
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add delivery/BYAK-v2-release.json
+          if git diff --cached --quiet; then
+            exit 0
+          fi
+          git commit -m "chore: record BYAK v2 artifact publication"
+          git push origin HEAD:automation/publish-byak-v2
