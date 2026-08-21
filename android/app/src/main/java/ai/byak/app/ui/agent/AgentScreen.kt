@@ -1,12 +1,14 @@
 package ai.byak.app.ui.agent
 
 import android.Manifest
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateContentSize
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -27,10 +29,13 @@ import androidx.compose.material.icons.outlined.BusinessCenter
 import androidx.compose.material.icons.outlined.Cancel
 import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material.icons.outlined.Code
+import androidx.compose.material.icons.outlined.ContentCopy
 import androidx.compose.material.icons.outlined.ErrorOutline
+import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.Schedule
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.Settings
+import androidx.compose.material.icons.outlined.Share
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
@@ -56,7 +61,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -70,7 +77,14 @@ import ai.byak.app.domain.model.AgentType
 import ai.byak.app.domain.model.StepStatus
 import ai.byak.app.ui.theme.GlassCard
 
-private data class AgentTemplate(val type: AgentType, val name: String, val description: String, val icon: ImageVector, val tint: Color)
+private data class AgentTemplate(
+    val type: AgentType,
+    val name: String,
+    val description: String,
+    val example: String,
+    val icon: ImageVector,
+    val tint: Color,
+)
 
 @Composable
 fun AgentScreen(viewModel: AgentViewModel, openSettings: () -> Unit) {
@@ -79,11 +93,9 @@ fun AgentScreen(viewModel: AgentViewModel, openSettings: () -> Unit) {
     val selected = state.runs.firstOrNull { it.id == state.selectedRunId }
     val context = LocalContext.current
     var launchAfterPermission by remember { mutableStateOf<Pair<AgentType, String>?>(null) }
-    val permissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
-        launchAfterPermission?.let { (type, goal) ->
-            if (granted) viewModel.start(type, goal)
-            launchAfterPermission = null
-        }
+    val permissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { _ ->
+        launchAfterPermission?.let { (type, goal) -> viewModel.start(type, goal) }
+        launchAfterPermission = null
     }
     fun start(type: AgentType, goal: String) {
         val needsPermission = Build.VERSION.SDK_INT >= 33 &&
@@ -114,7 +126,7 @@ fun AgentScreen(viewModel: AgentViewModel, openSettings: () -> Unit) {
         },
     ) { padding ->
         if (selected == null) AgentDashboard(state, viewModel, openSettings, ::start, Modifier.padding(padding))
-        else AgentRunDetail(selected, state.steps, viewModel, Modifier.padding(padding))
+        else AgentRunDetail(selected, state.steps, viewModel, ::start, Modifier.padding(padding))
     }
 }
 
@@ -126,16 +138,12 @@ private fun AgentDashboard(
     start: (AgentType, String) -> Unit,
     modifier: Modifier,
 ) {
-    val templates = listOf(
-        AgentTemplate(AgentType.DEEP_RESEARCH, "Deep Research", "Investigate evidence and deliver a decision-ready report.", Icons.Outlined.Search, Color(0xFF00E5FF)),
-        AgentTemplate(AgentType.BUILDER, "Builder", "Turn a product or app idea into a concrete implementation.", Icons.Outlined.Code, Color(0xFFB68CFF)),
-        AgentTemplate(AgentType.BUSINESS_PLANNER, "Business Planner", "Test positioning, economics, risks, and next moves.", Icons.Outlined.BusinessCenter, Color(0xFFFFD700)),
-    )
+    val templates = agentTemplates()
     var selectedTemplate by remember { mutableStateOf<AgentTemplate?>(null) }
     LazyColumn(modifier.fillMaxSize(), contentPadding = PaddingValues(18.dp), verticalArrangement = Arrangement.spacedBy(13.dp)) {
         item {
             Text("Long work, without babysitting", fontSize = 28.sp, lineHeight = 33.sp, fontWeight = FontWeight.Black)
-            Text("You can leave the app. Progress stays visible and the result waits here.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text("Choose a specialist, explain the outcome, and leave the app if you need to. Progress and results stay here.", color = MaterialTheme.colorScheme.onSurfaceVariant)
             Spacer(Modifier.height(10.dp))
         }
         if (!state.providerReady) {
@@ -177,7 +185,7 @@ private fun AgentDashboard(
                             Text(run.goal, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis)
                             Text("${run.type.displayName()} · ${run.status.displayName()}", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
                         }
-                        if (run.status == AgentStatus.RUNNING) CircularProgressIndicator(Modifier.size(24.dp), strokeWidth = 2.dp)
+                        if (run.status in listOf(AgentStatus.RUNNING, AgentStatus.QUEUED)) CircularProgressIndicator(Modifier.size(24.dp), strokeWidth = 2.dp)
                     }
                 }
             }
@@ -189,7 +197,15 @@ private fun AgentDashboard(
 }
 
 @Composable
-private fun AgentRunDetail(run: AgentRun, steps: List<AgentStep>, viewModel: AgentViewModel, modifier: Modifier) {
+private fun AgentRunDetail(
+    run: AgentRun,
+    steps: List<AgentStep>,
+    viewModel: AgentViewModel,
+    restart: (AgentType, String) -> Unit,
+    modifier: Modifier,
+) {
+    val context = LocalContext.current
+    val clipboard = LocalClipboardManager.current
     LazyColumn(modifier.fillMaxSize(), contentPadding = PaddingValues(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         item {
             GlassCard(Modifier.fillMaxWidth()) {
@@ -200,6 +216,11 @@ private fun AgentRunDetail(run: AgentRun, steps: List<AgentStep>, viewModel: Age
                     Text("${run.progress}% · ${run.status.displayName()}", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp, modifier = Modifier.padding(top = 7.dp))
                     if (run.status in listOf(AgentStatus.RUNNING, AgentStatus.QUEUED)) {
                         TextButton({ viewModel.cancel(run.id) }, Modifier.align(Alignment.End)) { Icon(Icons.Outlined.Cancel, null); Text(" Stop agent") }
+                    } else {
+                        OutlinedButton({ restart(run.type, run.goal) }, Modifier.align(Alignment.End)) {
+                            Icon(Icons.Outlined.Refresh, null)
+                            Text(" Run again")
+                        }
                     }
                 }
             }
@@ -211,7 +232,24 @@ private fun AgentRunDetail(run: AgentRun, steps: List<AgentStep>, viewModel: Age
         if (run.result.isNotBlank()) item {
             Text("Final result", fontSize = 21.sp, fontWeight = FontWeight.Black, modifier = Modifier.padding(top = 10.dp))
             Surface(shape = RoundedCornerShape(22.dp), color = MaterialTheme.colorScheme.surfaceVariant) {
-                Text(run.result, Modifier.padding(18.dp), lineHeight = 22.sp)
+                Column(Modifier.padding(18.dp)) {
+                    Text(run.result, lineHeight = 22.sp)
+                    Row(Modifier.align(Alignment.End)) {
+                        IconButton({ clipboard.setText(AnnotatedString(run.result)) }) { Icon(Icons.Outlined.ContentCopy, "Copy result") }
+                        IconButton({
+                            context.startActivity(
+                                Intent.createChooser(
+                                    Intent(Intent.ACTION_SEND).apply {
+                                        type = "text/plain"
+                                        putExtra(Intent.EXTRA_SUBJECT, "BYAK ${run.type.displayName()} result")
+                                        putExtra(Intent.EXTRA_TEXT, run.result)
+                                    },
+                                    "Share BYAK result",
+                                ),
+                            )
+                        }) { Icon(Icons.Outlined.Share, "Share result") }
+                    }
+                }
             }
         }
     }
@@ -246,11 +284,19 @@ private fun GoalDialog(template: AgentTemplate, dismiss: () -> Unit, submit: (St
         title = { Text(template.name) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Text("Describe the result you want. You can close BYAK after it starts.")
-                OutlinedTextField(goal, { goal = it }, label = { Text("Your goal") }, minLines = 4, maxLines = 8, shape = RoundedCornerShape(18.dp))
+                Text("Describe the finished result you want. BYAK will plan, work, check, and deliver it.")
+                Surface(
+                    Modifier.fillMaxWidth().clickable { goal = template.example },
+                    shape = RoundedCornerShape(14.dp),
+                    color = MaterialTheme.colorScheme.surfaceVariant,
+                ) {
+                    Text("Example: ${template.example}", Modifier.padding(12.dp), color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
+                }
+                OutlinedTextField(goal, { goal = it.take(4_000) }, label = { Text("Your goal") }, minLines = 4, maxLines = 8, shape = RoundedCornerShape(18.dp))
+                Text("${goal.length}/4000", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp, modifier = Modifier.align(Alignment.End))
             }
         },
-        confirmButton = { Button({ submit(goal.trim()) }, enabled = goal.trim().length >= 8) { Text("Start") } },
+        confirmButton = { Button({ submit(goal.trim()) }, enabled = goal.trim().length >= 8) { Text("Start agent") } },
         dismissButton = { TextButton(dismiss) { Text("Cancel") } },
     )
 }
@@ -265,10 +311,24 @@ private fun StatusIcon(status: AgentStatus) {
     }
 }
 
+private fun agentTemplates() = listOf(
+    AgentTemplate(AgentType.DEEP_RESEARCH, "Deep Research", "Investigate evidence, uncertainty, and competing answers.", "Compare the best ways to launch my product in Canada and give me a sourced decision report.", Icons.Outlined.Search, Color(0xFF00E5FF)),
+    AgentTemplate(AgentType.BUILDER, "Builder", "Turn an app or product idea into an implementation package.", "Design an Android expense app with screens, data model, milestones, tests, and launch checklist.", Icons.Outlined.Code, Color(0xFFB68CFF)),
+    AgentTemplate(AgentType.BUSINESS_PLANNER, "Business Planner", "Test positioning, economics, risks, and next moves.", "Create a 90-day plan to validate and sell my eco-packaging offer in Ontario.", Icons.Outlined.BusinessCenter, Color(0xFFFFD700)),
+    AgentTemplate(AgentType.CONTENT_STUDIO, "Content Studio", "Create a consistent campaign, script, or content system.", "Create a 30-day launch campaign with hooks, scripts, captions, and a posting calendar.", Icons.Outlined.AutoAwesome, Color(0xFFFF8A65)),
+    AgentTemplate(AgentType.STUDY_COACH, "Study Coach", "Build a learning path, lessons, practice, and review plan.", "Teach me Kotlin from beginner to job-ready with weekly projects and quizzes.", Icons.Outlined.Search, Color(0xFF69F0AE)),
+    AgentTemplate(AgentType.CAREER_COACH, "Career Coach", "Improve a resume, job search, interview, or career move.", "Rewrite my resume for warehouse supervisor roles and create an interview practice plan.", Icons.Outlined.BusinessCenter, Color(0xFFFFD180)),
+    AgentTemplate(AgentType.DATA_ANALYST, "Data Analyst", "Turn supplied numbers or documents into findings and decisions.", "Analyze the data in my private library, identify patterns, and provide recommendations with caveats.", Icons.Outlined.Code, Color(0xFF80CBC4)),
+)
+
 private fun AgentType.displayName() = when (this) {
     AgentType.DEEP_RESEARCH -> "Deep Research"
     AgentType.BUILDER -> "Builder"
     AgentType.BUSINESS_PLANNER -> "Business Planner"
+    AgentType.CONTENT_STUDIO -> "Content Studio"
+    AgentType.STUDY_COACH -> "Study Coach"
+    AgentType.CAREER_COACH -> "Career Coach"
+    AgentType.DATA_ANALYST -> "Data Analyst"
 }
 
 private fun AgentStatus.displayName() = name.lowercase().replaceFirstChar(Char::uppercase)
