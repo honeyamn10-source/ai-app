@@ -119,7 +119,7 @@ class BillingManager @Inject constructor(
             .setBillingProgram(BillingClient.BillingProgram.BILLING_CHOICE)
             .build()
         client.getBillingChoiceInfoAsync(params) { result, info ->
-            if (result.responseCode == BillingClient.BillingResponseCode.OK) {
+            if (result.responseCode == BillingClient.BillingResponseCode.OK && info != null) {
                 mutableState.update {
                     it.copy(
                         billingChoiceImageUrl = info.playBillingChoiceImageUrl,

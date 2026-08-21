@@ -60,8 +60,10 @@ object NetworkModule {
         install(ContentNegotiation) { json(json) }
         install(HttpTimeout) {
             connectTimeoutMillis = 20_000
-            requestTimeoutMillis = HttpTimeout.INFINITE_TIMEOUT_MS
-            socketTimeoutMillis = HttpTimeout.INFINITE_TIMEOUT_MS
+            // The configured OkHttp engine has an infinite read timeout for SSE.
+            // Null disables Ktor's higher-level request/socket deadlines as well.
+            requestTimeoutMillis = null
+            socketTimeoutMillis = null
         }
         defaultRequest {
             headers {
