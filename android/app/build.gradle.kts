@@ -11,12 +11,11 @@ android {
         applicationId = "ai.byak.app"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = 2
+        versionName = "0.2.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
-        buildConfigField("String", "API_BASE_URL", "\"${project.findProperty("BYAK_API_URL") ?: "http://10.0.2.2:8787"}\"")
     }
-    buildFeatures { compose = true; buildConfig = true }
+    buildFeatures { compose = true }
     buildTypes {
         debug { applicationIdSuffix = ".debug"; versionNameSuffix = "-debug" }
         release {

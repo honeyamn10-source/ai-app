@@ -38,9 +38,8 @@ private enum class Destination(val title: String, val icon: ImageVector) {
 }
 
 @Composable
-fun ByakApp(api: ApiClient, sessionStore: SessionStore) {
-    val session by sessionStore.session.collectAsState(initial = null)
-    if (session == null) AuthScreen(api) else MainShell(api, session!!)
+fun ByakApp(api: ApiClient) {
+    MainShell(api, Session("local", "", "You", "Device-only mode"))
 }
 
 @Composable
@@ -160,7 +159,7 @@ private fun HomeScreen(session: Session, state: UiState, navigate: (Destination)
         item { QuickTool(Destination.Search, "Web, GitHub and Reddit research", navigate) }
         item { QuickTool(Destination.Files, "Private document knowledge", navigate) }
         item { QuickTool(Destination.Models, "Connect your AI providers", navigate) }
-        item { ListItem(headlineContent = { Text("Local AI — Coming soon") }, supportingContent = { Text("Ollama, llama.cpp and on-device models") }, leadingContent = { Icon(Icons.Outlined.Laptop, null) }) }
+        item { ListItem(headlineContent = { Text("Standalone BYOK mode") }, supportingContent = { Text("Provider keys and app data stay encrypted on this device") }, leadingContent = { Icon(Icons.Outlined.Security, null) }) }
     }
 }
 
@@ -296,12 +295,18 @@ private fun ModelsScreen(state: UiState, vm: ByakViewModel) {
 @Composable
 private fun ProviderDialog(close: () -> Unit, save: (String, String, String, String) -> Unit) {
     val types = listOf("openai", "anthropic", "gemini", "openrouter", "groq", "mistral", "deepseek", "custom")
+    val defaults = mapOf(
+        "openai" to "gpt-4.1-mini", "anthropic" to "claude-sonnet-4-20250514",
+        "gemini" to "gemini-2.5-flash", "openrouter" to "openai/gpt-4.1-mini",
+        "groq" to "llama-3.3-70b-versatile", "mistral" to "mistral-small-latest",
+        "deepseek" to "deepseek-chat", "custom" to ""
+    )
     var type by remember { mutableStateOf("openai") }; var key by remember { mutableStateOf("") }
     var model by remember { mutableStateOf("gpt-4.1-mini") }; var base by remember { mutableStateOf("") }
     AlertDialog(
         onDismissRequest = close, title = { Text("Connect provider") },
-        text = { Column(verticalArrangement = Arrangement.spacedBy(8.dp)) { Row(Modifier.horizontalScroll(rememberScrollState())) { types.forEach { item -> FilterChip(selected = type == item, onClick = { type = item }, label = { Text(item) }); Spacer(Modifier.width(6.dp)) } }; OutlinedTextField(key, { key = it }, label = { Text("API key") }, visualTransformation = PasswordVisualTransformation()); OutlinedTextField(model, { model = it }, label = { Text("Default model") }); if (type == "custom") OutlinedTextField(base, { base = it }, label = { Text("HTTPS endpoint") }) } },
-        confirmButton = { Button(onClick = { save(type, key, model, base) }, enabled = key.isNotBlank()) { Text("Save securely") } },
+        text = { Column(verticalArrangement = Arrangement.spacedBy(8.dp)) { Text("The key is encrypted by Android Keystore and is sent only to the selected provider.", style = MaterialTheme.typography.bodySmall); Row(Modifier.horizontalScroll(rememberScrollState())) { types.forEach { item -> FilterChip(selected = type == item, onClick = { type = item; model = defaults[item].orEmpty() }, label = { Text(item) }); Spacer(Modifier.width(6.dp)) } }; OutlinedTextField(key, { key = it }, label = { Text("API key") }, visualTransformation = PasswordVisualTransformation()); OutlinedTextField(model, { model = it }, label = { Text("Default model") }); if (type == "custom") OutlinedTextField(base, { base = it }, label = { Text("HTTPS endpoint") }) } },
+        confirmButton = { Button(onClick = { save(type, key, model, base) }, enabled = key.isNotBlank() && model.isNotBlank()) { Text("Save securely") } },
         dismissButton = { TextButton(onClick = close) { Text("Cancel") } }
     )
 }
@@ -310,16 +315,15 @@ private fun ProviderDialog(close: () -> Unit, save: (String, String, String, Str
 private fun SettingsScreen(api: ApiClient, session: Session, state: UiState, openModels: () -> Unit) {
     val scope = rememberCoroutineScope(); var delete by remember { mutableStateOf(false) }
     LazyColumn(contentPadding = PaddingValues(20.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        item { ListItem(headlineContent = { Text(session.name) }, supportingContent = { Text(session.email) }, leadingContent = { Icon(Icons.Outlined.AccountCircle, null) }) }
-        item { ListItem(headlineContent = { Text("Provider security") }, supportingContent = { Text("${state.providers.size} encrypted connection(s)") }, modifier = Modifier.clickable(onClick = openModels)) }
-        item { ListItem(headlineContent = { Text("Free plan") }, supportingContent = { Text("$1 monthly / $10 annual architecture ready") }) }
-        item { Button(onClick = { scope.launch { api.logout() } }, Modifier.fillMaxWidth()) { Icon(Icons.Outlined.Logout, null); Text(" Sign out") } }
-        item { TextButton(onClick = { delete = true }, Modifier.fillMaxWidth()) { Text("Delete account") } }
+        item { ListItem(headlineContent = { Text("Private device mode") }, supportingContent = { Text("No BYAK server or account required") }, leadingContent = { Icon(Icons.Outlined.Smartphone, null) }) }
+        item { ListItem(headlineContent = { Text("Provider security") }, supportingContent = { Text("${state.providers.size} key(s) encrypted by Android Keystore") }, modifier = Modifier.clickable(onClick = openModels)) }
+        item { ListItem(headlineContent = { Text("Local storage") }, supportingContent = { Text("Chats, projects and files stay on this device") }) }
+        item { TextButton(onClick = { delete = true }, Modifier.fillMaxWidth()) { Text("Clear all local data") } }
     }
     if (delete) AlertDialog(
-        onDismissRequest = { delete = false }, title = { Text("Delete account?") },
-        text = { Text("This permanently removes sessions, chats, files, projects and provider connections.") },
-        confirmButton = { Button(onClick = { scope.launch { api.deleteAccount() } }) { Text("Delete permanently") } },
+        onDismissRequest = { delete = false }, title = { Text("Clear all local data?") },
+        text = { Text("This permanently removes encrypted API keys, chats, files and projects from this phone.") },
+        confirmButton = { Button(onClick = { scope.launch { api.deleteAccount(); delete = false } }) { Text("Clear permanently") } },
         dismissButton = { TextButton(onClick = { delete = false }) { Text("Cancel") } }
     )
 }
