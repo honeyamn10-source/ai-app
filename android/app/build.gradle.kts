@@ -125,7 +125,6 @@ dependencies {
     implementation("io.ktor:ktor-client-content-negotiation:3.5.2")
     implementation("io.ktor:ktor-client-auth:3.5.2")
     implementation("io.ktor:ktor-client-logging:3.5.2")
-    implementation("io.ktor:ktor-client-sse:3.5.2")
     implementation("io.ktor:ktor-serialization-kotlinx-json:3.5.2")
     implementation("com.squareup.okhttp3:okhttp:5.3.2")
 
