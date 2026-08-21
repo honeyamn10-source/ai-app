@@ -48,7 +48,7 @@ enum class AgentStage { PLAN, RESEARCH, SYNTHESIZE, RESULT }
 enum class AgentStatus { QUEUED, RUNNING, SUCCEEDED, FAILED, CANCELLED }
 enum class StepStatus { PENDING, RUNNING, COMPLETE, FAILED }
 enum class MessageRole { USER, ASSISTANT, SYSTEM }
-enum class AiProvider { OPENAI, ANTHROPIC, GEMINI }
+enum class AiProvider { OPENAI, OPENROUTER, ANTHROPIC, GEMINI }
 
 @Immutable
 data class Conversation(
