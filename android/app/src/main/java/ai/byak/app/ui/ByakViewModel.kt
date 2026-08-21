@@ -10,7 +10,8 @@ data class UiState(
     val loading: Boolean = false, val error: String? = null, val providers: List<Provider> = emptyList(),
     val conversations: List<Conversation> = emptyList(), val messages: List<ChatMessage> = emptyList(),
     val activeConversation: Conversation? = null, val projects: List<Project> = emptyList(),
-    val files: List<UserFile> = emptyList(), val research: List<ResearchResult> = emptyList()
+    val files: List<UserFile> = emptyList(), val research: List<ResearchResult> = emptyList(),
+    val agentEvents: List<AgentEvent> = emptyList(), val agentRunning: Boolean = false
 )
 
 class ByakViewModel(private val api: ApiClient) : ViewModel() {
@@ -34,7 +35,24 @@ class ByakViewModel(private val api: ApiClient) : ViewModel() {
     fun removeProject(id: String) = launch { api.deleteProject(id); copy(projects = api.projects()) }
     fun upload(name: String, type: String, text: String) = launch { api.uploadText(name, type, text); copy(files = api.files()) }
     fun removeFile(id: String) = launch { api.deleteFile(id); copy(files = api.files()) }
+    fun runAgent(template: String, goal: String) = viewModelScope.launch {
+        val provider = state.value.providers.firstOrNull()
+        if (provider == null) {
+            _state.update { it.copy(error = "Connect one AI provider first", agentRunning = false) }
+            return@launch
+        }
+        _state.update { it.copy(agentEvents = emptyList(), agentRunning = true, error = null) }
+        try {
+            api.runAgent(template, goal, provider.id, provider.defaultModel).collect { event ->
+                _state.update { current -> current.copy(agentEvents = current.agentEvents + event) }
+            }
+            copy(conversations = api.conversations())
+        } catch (error: Exception) {
+            _state.update { it.copy(error = error.message ?: "Agent run failed") }
+        } finally {
+            _state.update { it.copy(agentRunning = false) }
+        }
+    }
     private fun launch(block: suspend () -> Unit) = viewModelScope.launch { _state.update { it.copy(loading = true, error = null) }; try { block() } catch (e: Exception) { _state.update { it.copy(error = e.message ?: "Something went wrong") } } finally { _state.update { it.copy(loading = false) } } }
     private fun copy(providers: List<Provider> = state.value.providers, conversations: List<Conversation> = state.value.conversations, messages: List<ChatMessage> = state.value.messages, activeConversation: Conversation? = state.value.activeConversation, projects: List<Project> = state.value.projects, files: List<UserFile> = state.value.files, research: List<ResearchResult> = state.value.research) { _state.update { it.copy(providers = providers, conversations = conversations, messages = messages, activeConversation = activeConversation, projects = projects, files = files, research = research) } }
 }
-

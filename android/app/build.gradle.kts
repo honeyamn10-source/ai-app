@@ -11,12 +11,11 @@ android {
         applicationId = "ai.byak.app"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = 3
+        versionName = "0.3.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
-        buildConfigField("String", "API_BASE_URL", "\"${project.findProperty("BYAK_API_URL") ?: "http://10.0.2.2:8787"}\"")
     }
-    buildFeatures { compose = true; buildConfig = true }
+    buildFeatures { compose = true }
     buildTypes {
         debug { applicationIdSuffix = ".debug"; versionNameSuffix = "-debug" }
         release {
@@ -26,8 +25,13 @@ android {
         }
     }
     compileOptions { sourceCompatibility = JavaVersion.VERSION_17; targetCompatibility = JavaVersion.VERSION_17 }
-    kotlinOptions { jvmTarget = "17" }
     packaging { resources.excludes += setOf("/META-INF/{AL2.0,LGPL2.1}") }
+}
+
+kotlin {
+    compilerOptions {
+        jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
+    }
 }
 
 dependencies {

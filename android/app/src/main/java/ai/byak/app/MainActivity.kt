@@ -12,7 +12,6 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         val app = application as ByakApplication
-        setContent { ByakTheme { ByakApp(app.api, app.sessionStore) } }
+        setContent { ByakTheme { ByakApp(app.api, app.billing) } }
     }
 }
-

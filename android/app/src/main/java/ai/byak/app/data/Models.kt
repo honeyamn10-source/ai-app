@@ -7,4 +7,4 @@ data class ChatMessage(val id: String, val role: String, val content: String, va
 data class Project(val id: String, val name: String, val description: String = "")
 data class ResearchResult(val title: String, val url: String, val summary: String)
 data class UserFile(val id: String, val name: String, val mimeType: String, val chunkCount: Int)
-
+data class AgentEvent(val stage: String, val message: String, val completed: Boolean = false)

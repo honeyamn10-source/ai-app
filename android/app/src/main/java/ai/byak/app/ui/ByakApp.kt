@@ -1,17 +1,18 @@
-@file:OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class, androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
-
 package ai.byak.app.ui
 
+import android.app.Activity
 import android.content.Intent
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.*
@@ -19,6 +20,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -28,115 +30,539 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import ai.byak.app.billing.BillingManager
+import ai.byak.app.billing.BillingState
 import ai.byak.app.data.*
 import kotlinx.coroutines.launch
 
-private enum class Destination(val title: String, val icon: ImageVector) {
-    Home("Home", Icons.Outlined.Home), Chats("Chats", Icons.Outlined.ChatBubbleOutline),
-    Search("Research", Icons.Outlined.TravelExplore), Files("Files", Icons.Outlined.FolderOpen),
-    Projects("Projects", Icons.Outlined.Workspaces), Models("Models", Icons.Outlined.Hub),
-    Settings("Settings", Icons.Outlined.Settings)
+private enum class AppTab(val label: String, val icon: ImageVector) {
+    Chat("Chat", Icons.Outlined.ChatBubbleOutline),
+    Agents("Agents", Icons.Outlined.AutoAwesome),
+    Library("Library", Icons.Outlined.FolderOpen),
+    You("You", Icons.Outlined.PersonOutline)
 }
 
-@Composable fun ByakApp(api: ApiClient, sessionStore: SessionStore) {
-    val session by sessionStore.session.collectAsState(initial = null)
-    if (session == null) AuthScreen(api) else MainShell(api, sessionStore, session!!)
-}
+private data class AgentTemplate(val name: String, val detail: String, val icon: ImageVector, val tint: Color)
 
-@Composable private fun AuthScreen(api: ApiClient) {
-    var register by remember { mutableStateOf(false) }; var name by remember { mutableStateOf("") }; var email by remember { mutableStateOf("") }; var password by remember { mutableStateOf("") }; var error by remember { mutableStateOf<String?>(null) }; var busy by remember { mutableStateOf(false) }; val scope = rememberCoroutineScope()
-    Box(Modifier.fillMaxSize().background(Brush.radialGradient(listOf(MaterialTheme.colorScheme.primary.copy(.22f), MaterialTheme.colorScheme.background), radius = 1200f)), contentAlignment = Alignment.Center) {
-        Card(Modifier.padding(24.dp).widthIn(max = 440.dp), shape = RoundedCornerShape(32.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface.copy(.96f))) {
-            Column(Modifier.padding(28.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                Surface(shape = RoundedCornerShape(16.dp), color = MaterialTheme.colorScheme.primary) { Icon(Icons.Outlined.AutoAwesome, null, Modifier.padding(12.dp), tint = Color.White) }
-                Text("BYAK AI", fontSize = 30.sp, fontWeight = FontWeight.Black)
-                Text("Bring Your API Key. Bring Your Intelligence.", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                if (register) OutlinedTextField(name, { name = it }, Modifier.fillMaxWidth(), label = { Text("Name") }, singleLine = true)
-                OutlinedTextField(email, { email = it }, Modifier.fillMaxWidth(), label = { Text("Email") }, singleLine = true)
-                OutlinedTextField(password, { password = it }, Modifier.fillMaxWidth(), label = { Text("Password") }, visualTransformation = PasswordVisualTransformation(), singleLine = true)
-                error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
-                Button(onClick = { scope.launch { busy = true; error = null; runCatching { if (register) api.register(name, email, password) else api.login(email, password) }.onFailure { error = it.message }; busy = false } }, Modifier.fillMaxWidth().height(52.dp), enabled = !busy) { if (busy) CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp) else Text(if (register) "Create BYAK account" else "Sign in") }
-                OutlinedButton(onClick = { error = "Add your Google OAuth client ID to enable Google Sign-In." }, Modifier.fillMaxWidth()) { Icon(Icons.Outlined.AccountCircle, null); Spacer(Modifier.width(8.dp)); Text("Continue with Google") }
-                TextButton(onClick = { register = !register; error = null }, Modifier.align(Alignment.CenterHorizontally)) { Text(if (register) "Already registered? Sign in" else "New here? Create account") }
-                Text("Your provider keys are encrypted and are never included in the APK.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun ByakApp(api: ApiClient, billingManager: BillingManager) {
+    val vm = remember(api) { ByakViewModel(api) }
+    val state by vm.state.collectAsState()
+    val billing by billingManager.state.collectAsState()
+    var tab by remember { mutableStateOf(AppTab.Chat) }
+    var showModels by remember { mutableStateOf(false) }
+    var showPlans by remember { mutableStateOf(false) }
+
+    LaunchedEffect(Unit) { vm.bootstrap() }
+
+    Scaffold(
+        containerColor = MaterialTheme.colorScheme.background,
+        topBar = {
+            CenterAlignedTopAppBar(
+                title = {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        ByakMark(34.dp)
+                        Text("BYAK", fontWeight = FontWeight.Black, letterSpacing = 1.sp)
+                    }
+                },
+                navigationIcon = { Spacer(Modifier.width(48.dp)) },
+                actions = {
+                    Surface(
+                        onClick = { showPlans = true },
+                        shape = RoundedCornerShape(20.dp),
+                        color = if (billing.active) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant
+                    ) {
+                        Row(Modifier.padding(horizontal = 12.dp, vertical = 7.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Outlined.WorkspacePremium, null, Modifier.size(17.dp))
+                            Text(if (billing.active) " Pro" else " Upgrade", style = MaterialTheme.typography.labelLarge)
+                        }
+                    }
+                    Spacer(Modifier.width(10.dp))
+                }
+            )
+        },
+        bottomBar = {
+            NavigationBar {
+                AppTab.entries.forEach { item ->
+                    NavigationBarItem(
+                        selected = tab == item,
+                        onClick = { tab = item },
+                        icon = { Icon(item.icon, item.label) },
+                        label = { Text(item.label) }
+                    )
+                }
+            }
+        }
+    ) { padding ->
+        Box(Modifier.fillMaxSize().padding(padding)) {
+            when (tab) {
+                AppTab.Chat -> FriendlyChatScreen(state, vm, openModels = { showModels = true })
+                AppTab.Agents -> AgentsScreen(state, vm, openModels = { showModels = true })
+                AppTab.Library -> LibraryScreen(state, vm)
+                AppTab.You -> ProfileScreen(state, api, billing, openModels = { showModels = true }, openPlans = { showPlans = true })
+            }
+            state.error?.let { message ->
+                Snackbar(
+                    Modifier.align(Alignment.BottomCenter).padding(16.dp),
+                    action = { TextButton(onClick = vm::clearError) { Text("Dismiss") } }
+                ) { Text(message) }
             }
         }
     }
+
+    if (showModels) ModelSheet(state, vm, close = { showModels = false })
+    if (showPlans) SubscriptionSheet(billing, billingManager, close = { showPlans = false })
 }
 
-@Composable private fun MainShell(api: ApiClient, sessions: SessionStore, session: Session) {
-    val vm = remember(api) { ByakViewModel(api) }; val state by vm.state.collectAsState(); var destination by remember { mutableStateOf(Destination.Home) }
-    LaunchedEffect(Unit) { vm.bootstrap() }
-    BoxWithConstraints(Modifier.fillMaxSize()) {
-        val useRail = maxWidth >= 720.dp
-        Scaffold(
-            topBar = { TopAppBar(title = { Column { Text(destination.title, fontWeight = FontWeight.Bold); Text("BYAK AI", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary) } }, actions = { if (state.loading) CircularProgressIndicator(Modifier.size(22.dp), strokeWidth = 2.dp); IconButton(onClick = vm::bootstrap) { Icon(Icons.Outlined.Refresh, "Refresh") }; Spacer(Modifier.width(8.dp)) }) },
-            bottomBar = { if (!useRail) NavigationBar { Destination.entries.take(5).forEach { item -> NavigationBarItem(selected = destination == item, onClick = { destination = item }, icon = { Icon(item.icon, item.title) }, label = { Text(item.title) }) } } },
-            snackbarHost = { state.error?.let { message -> Snackbar(Modifier.padding(16.dp), action = { TextButton(onClick = vm::clearError) { Text("Dismiss") } }) { Text(message) } } }
-        ) { padding ->
-            Row(Modifier.padding(padding).fillMaxSize()) {
-                if (useRail) NavigationRail(header = { Surface(Modifier.padding(12.dp), color = MaterialTheme.colorScheme.primary, shape = RoundedCornerShape(14.dp)) { Icon(Icons.Outlined.AutoAwesome, null, Modifier.padding(10.dp), tint = Color.White) } }) { Destination.entries.forEach { item -> NavigationRailItem(selected = destination == item, onClick = { destination = item }, icon = { Icon(item.icon, item.title) }, label = { Text(item.title) }) } } }
-                Box(Modifier.weight(1f).fillMaxHeight()) {
-                    when (destination) {
-                        Destination.Home -> HomeScreen(session, state) { destination = it }
-                        Destination.Chats -> ChatScreen(state, vm)
-                        Destination.Search -> SearchScreen(state, vm)
-                        Destination.Files -> FilesScreen(state, vm)
-                        Destination.Projects -> ProjectsScreen(state, vm)
-                        Destination.Models -> ModelsScreen(state, vm)
-                        Destination.Settings -> SettingsScreen(api, sessions, session, state) { destination = Destination.Models }
+@Composable
+private fun ByakMark(size: androidx.compose.ui.unit.Dp) {
+    Box(
+        Modifier.size(size).clip(RoundedCornerShape(size * .32f)).background(
+            Brush.linearGradient(listOf(Color(0xFF6C5CE7), Color(0xFF9B8AFB), Color(0xFFFFB86B)))
+        ),
+        contentAlignment = Alignment.Center
+    ) { Icon(Icons.Outlined.AutoAwesome, "BYAK", tint = Color.White, modifier = Modifier.size(size * .58f)) }
+}
+
+@Composable
+private fun FriendlyChatScreen(state: UiState, vm: ByakViewModel, openModels: () -> Unit) {
+    val conversation = state.activeConversation
+    Column(Modifier.fillMaxSize()) {
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Surface(onClick = openModels, shape = RoundedCornerShape(18.dp), color = MaterialTheme.colorScheme.surfaceVariant) {
+                Row(Modifier.padding(horizontal = 12.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Outlined.Bolt, null, Modifier.size(17.dp), tint = MaterialTheme.colorScheme.primary)
+                    Text(" ${state.providers.firstOrNull()?.name ?: "Choose AI"}", fontWeight = FontWeight.SemiBold)
+                    Icon(Icons.Outlined.ExpandMore, null, Modifier.size(18.dp))
+                }
+            }
+            Spacer(Modifier.weight(1f))
+            IconButton(onClick = vm::newConversation, enabled = state.providers.isNotEmpty()) { Icon(Icons.Outlined.AddComment, "New chat") }
+        }
+
+        if (conversation == null) ChatWelcome(state, vm, openModels) else ConversationView(state, vm)
+    }
+}
+
+@Composable
+private fun ChatWelcome(state: UiState, vm: ByakViewModel, openModels: () -> Unit) {
+    LazyColumn(
+        Modifier.fillMaxSize(), contentPadding = PaddingValues(horizontal = 20.dp, vertical = 16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        item {
+            Spacer(Modifier.height(12.dp))
+            Text("Hello, I’m BYAK", fontSize = 31.sp, fontWeight = FontWeight.Black)
+            Text("What would you like to make or solve today?", fontSize = 18.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Spacer(Modifier.height(20.dp))
+        }
+        if (state.providers.isEmpty()) {
+            item {
+                Card(
+                    onClick = openModels,
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
+                    shape = RoundedCornerShape(24.dp)
+                ) {
+                    Row(Modifier.fillMaxWidth().padding(20.dp), verticalAlignment = Alignment.CenterVertically) {
+                        ByakMark(46.dp)
+                        Column(Modifier.weight(1f).padding(horizontal = 14.dp)) {
+                            Text("Connect your AI", fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                            Text("A simple one-time setup. Your key stays encrypted on this phone.")
+                        }
+                        Icon(Icons.Outlined.ArrowForward, null)
                     }
                 }
             }
         }
+        item { Text("Try asking", fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 8.dp)) }
+        items(
+            listOf(
+                "Create a business plan" to Icons.Outlined.Lightbulb,
+                "Research a difficult topic" to Icons.Outlined.TravelExplore,
+                "Help me build an app" to Icons.Outlined.Code,
+                "Explain something simply" to Icons.Outlined.School
+            )
+        ) { suggestion ->
+            SuggestionCard(suggestion.first, suggestion.second, enabled = state.providers.isNotEmpty(), onClick = vm::newConversation)
+        }
+        if (state.conversations.isNotEmpty()) {
+            item { Text("Recent", fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 14.dp)) }
+            items(state.conversations.take(6)) { item ->
+                ListItem(
+                    headlineContent = { Text(item.title, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                    supportingContent = { Text(item.model.ifBlank { "BYAK conversation" }) },
+                    leadingContent = { Icon(Icons.Outlined.ChatBubbleOutline, null) },
+                    trailingContent = { Icon(Icons.Outlined.ChevronRight, null) },
+                    modifier = Modifier.clip(RoundedCornerShape(18.dp)).clickable { vm.openConversation(item) }
+                )
+            }
+        }
     }
 }
 
-@Composable private fun HomeScreen(session: Session, state: UiState, navigate: (Destination) -> Unit) {
-    LazyColumn(Modifier.fillMaxSize().padding(horizontal = 20.dp), contentPadding = PaddingValues(vertical = 22.dp), verticalArrangement = Arrangement.spacedBy(18.dp)) {
-        item { Text("Good to see you, ${session.name.substringBefore(' ')}", fontSize = 28.sp, fontWeight = FontWeight.Black); Text("One intelligent workspace. Your models, your data, your choice.", color = MaterialTheme.colorScheme.onSurfaceVariant) }
-        item { Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer), shape = RoundedCornerShape(28.dp), onClick = { navigate(Destination.Chats) }) { Row(Modifier.padding(24.dp).fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) { Column(Modifier.weight(1f)) { Text("Start creating", fontWeight = FontWeight.Bold, fontSize = 22.sp); Text(if (state.providers.isEmpty()) "Connect a provider to begin" else "Ask anything with ${state.providers.first().name}") }; Icon(Icons.Outlined.ArrowForward, null) } } }
-        item { Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) { Metric("Chats", state.conversations.size.toString(), Icons.Outlined.ChatBubbleOutline, Modifier.weight(1f)); Metric("Projects", state.projects.size.toString(), Icons.Outlined.Workspaces, Modifier.weight(1f)); Metric("Files", state.files.size.toString(), Icons.Outlined.Description, Modifier.weight(1f)) } }
-        item { Text("Quick tools", fontWeight = FontWeight.Bold, fontSize = 19.sp) }
-        items(listOf(Destination.Search to "Research the web, GitHub and Reddit", Destination.Files to "Build a private knowledge base", Destination.Models to "Connect OpenAI, Gemini, Claude and more")) { (dest, subtitle) -> ListItem(headlineContent = { Text(dest.title, fontWeight = FontWeight.SemiBold) }, supportingContent = { Text(subtitle) }, leadingContent = { Icon(dest.icon, null, tint = MaterialTheme.colorScheme.primary) }, trailingContent = { Icon(Icons.Outlined.ChevronRight, null) }, modifier = Modifier.clickable { navigate(dest) }) }
-        item { Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer)) { Row(Modifier.padding(18.dp), verticalAlignment = Alignment.CenterVertically) { Icon(Icons.Outlined.Laptop, null); Spacer(Modifier.width(14.dp)); Column { Text("Local AI", fontWeight = FontWeight.Bold); Text("Ollama and on-device models — coming soon") } } } }
+@Composable
+private fun SuggestionCard(text: String, icon: ImageVector, enabled: Boolean, onClick: () -> Unit) {
+    OutlinedCard(onClick = onClick, enabled = enabled, shape = RoundedCornerShape(18.dp)) {
+        Row(Modifier.fillMaxWidth().padding(17.dp), verticalAlignment = Alignment.CenterVertically) {
+            Icon(icon, null, tint = MaterialTheme.colorScheme.primary)
+            Text(text, Modifier.weight(1f).padding(horizontal = 14.dp), fontWeight = FontWeight.Medium)
+            Icon(Icons.Outlined.ArrowOutward, null, Modifier.size(18.dp))
+        }
     }
 }
 
-@Composable private fun Metric(label: String, value: String, icon: ImageVector, modifier: Modifier) { Card(modifier, shape = RoundedCornerShape(20.dp)) { Column(Modifier.padding(16.dp)) { Icon(icon, null, tint = MaterialTheme.colorScheme.primary); Spacer(Modifier.height(12.dp)); Text(value, fontSize = 24.sp, fontWeight = FontWeight.Black); Text(label, style = MaterialTheme.typography.labelMedium) } } }
-
-@Composable private fun ChatScreen(state: UiState, vm: ByakViewModel) {
+@Composable
+private fun ConversationView(state: UiState, vm: ByakViewModel) {
     var draft by remember { mutableStateOf("") }
-    Row(Modifier.fillMaxSize()) {
-        AnimatedVisibility(state.activeConversation == null) { LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(20.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) { item { Button(vm::newConversation, enabled = state.providers.isNotEmpty()) { Icon(Icons.Outlined.Add, null); Spacer(Modifier.width(8.dp)); Text("New chat") }; if (state.providers.isEmpty()) Text("Connect a model first from Models.", color = MaterialTheme.colorScheme.onSurfaceVariant) }; items(state.conversations) { item -> Card(Modifier.fillMaxWidth().clickable { vm.openConversation(item) }) { ListItem(headlineContent = { Text(item.title, maxLines = 1, overflow = TextOverflow.Ellipsis) }, supportingContent = { Text(item.model.ifBlank { "Choose model" }) }, leadingContent = { Icon(Icons.Outlined.ChatBubbleOutline, null) }) } } } }
-        state.activeConversation?.let { conversation -> Column(Modifier.fillMaxSize()) { Row(Modifier.padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) { IconButton(onClick = { /* list is restored when screen is reopened */ }) { Icon(Icons.Outlined.ChatBubbleOutline, "Chats") }; Column { Text(conversation.title, fontWeight = FontWeight.Bold, maxLines = 1); Text(conversation.model, style = MaterialTheme.typography.labelSmall) } }; LazyColumn(Modifier.weight(1f).fillMaxWidth(), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) { if (state.messages.isEmpty()) item { EmptyState(Icons.Outlined.AutoAwesome, "A fresh conversation", "Ask, create, research or analyze a document.") }; items(state.messages) { MessageBubble(it) } }; Surface(tonalElevation = 4.dp) { Row(Modifier.padding(12.dp).navigationBarsPadding(), verticalAlignment = Alignment.Bottom) { OutlinedTextField(draft, { draft = it }, Modifier.weight(1f), placeholder = { Text("Message BYAK AI") }, maxLines = 6, shape = RoundedCornerShape(22.dp)); Spacer(Modifier.width(8.dp)); FilledIconButton(onClick = { val value = draft.trim(); if (value.isNotEmpty()) { draft = ""; vm.send(value) } }, enabled = draft.isNotBlank() && !state.loading) { Icon(Icons.Outlined.ArrowUpward, "Send") } } } } }
+    Column(Modifier.fillMaxSize()) {
+        LazyColumn(
+            Modifier.weight(1f),
+            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 10.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            if (state.messages.isEmpty()) item {
+                Column(Modifier.fillParentMaxSize(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
+                    ByakMark(58.dp)
+                    Spacer(Modifier.height(14.dp))
+                    Text("A fresh conversation", fontSize = 22.sp, fontWeight = FontWeight.Bold)
+                    Text("Ask anything. I’ll help you work through it.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+            items(state.messages) { MessageBubble(it) }
+        }
+        Surface(tonalElevation = 3.dp) {
+            Row(Modifier.fillMaxWidth().padding(12.dp).navigationBarsPadding(), verticalAlignment = Alignment.Bottom) {
+                OutlinedTextField(
+                    value = draft, onValueChange = { draft = it }, modifier = Modifier.weight(1f),
+                    placeholder = { Text("Message BYAK…") }, maxLines = 6, shape = RoundedCornerShape(24.dp)
+                )
+                Spacer(Modifier.width(8.dp))
+                FilledIconButton(
+                    onClick = { val text = draft.trim(); if (text.isNotEmpty()) { draft = ""; vm.send(text) } },
+                    enabled = draft.isNotBlank() && !state.loading,
+                    modifier = Modifier.size(52.dp)
+                ) { Icon(Icons.Outlined.ArrowUpward, "Send") }
+            }
+        }
     }
 }
 
-@Composable private fun MessageBubble(message: ChatMessage) { val user = message.role == "user"; Row(Modifier.fillMaxWidth(), horizontalArrangement = if (user) Arrangement.End else Arrangement.Start) { Surface(color = if (user) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant, contentColor = if (user) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant, shape = RoundedCornerShape(20.dp), modifier = Modifier.widthIn(max = 680.dp)) { Column(Modifier.padding(14.dp)) { Text(if (user) "You" else "BYAK AI", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold); Spacer(Modifier.height(4.dp)); Text(message.content.ifEmpty { "Thinking…" }); if (message.pending) LinearProgressIndicator(Modifier.fillMaxWidth().padding(top = 8.dp)) } } } }
-
-@Composable private fun SearchScreen(state: UiState, vm: ByakViewModel) {
-    var query by remember { mutableStateOf("") }; var source by remember { mutableStateOf("github") }; val context = LocalContext.current
-    Column(Modifier.fillMaxSize().padding(20.dp)) { Text("Deep research", fontSize = 25.sp, fontWeight = FontWeight.Black); Text("Every result keeps its source attached.", color = MaterialTheme.colorScheme.onSurfaceVariant); Spacer(Modifier.height(16.dp)); SingleChoiceSegmentedButtonRow { listOf("web","github","reddit").forEachIndexed { i, item -> SegmentedButton(selected = source == item, onClick = { source = item }, shape = SegmentedButtonDefaults.itemShape(i, 3)) { Text(item.replaceFirstChar { it.uppercase() }) } } }; Spacer(Modifier.height(12.dp)); Row { OutlinedTextField(query, { query = it }, Modifier.weight(1f), placeholder = { Text("What do you want to research?") }, singleLine = true); Spacer(Modifier.width(8.dp)); FilledIconButton(onClick = { vm.search(query, source) }, enabled = query.isNotBlank() && !state.loading) { Icon(Icons.Outlined.Search, "Search") } }; Spacer(Modifier.height(12.dp)); LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp)) { if (state.research.isEmpty()) item { EmptyState(Icons.Outlined.TravelExplore, "Source-first research", "Search GitHub and Reddit now. Web search uses your configured server connector.") }; items(state.research) { result -> Card(Modifier.fillMaxWidth().clickable { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(result.url))) }) { ListItem(headlineContent = { Text(result.title, fontWeight = FontWeight.Bold) }, supportingContent = { Text(result.summary, maxLines = 4, overflow = TextOverflow.Ellipsis) }, trailingContent = { Icon(Icons.Outlined.OpenInNew, "Open source") }) } } } }
+@Composable
+private fun MessageBubble(message: ChatMessage) {
+    val user = message.role == "user"
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = if (user) Arrangement.End else Arrangement.Start) {
+        if (!user) { ByakMark(30.dp); Spacer(Modifier.width(8.dp)) }
+        Surface(
+            color = if (user) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
+            contentColor = if (user) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
+            shape = RoundedCornerShape(22.dp), modifier = Modifier.widthIn(max = 680.dp).fillMaxWidth(if (user) .86f else .92f)
+        ) {
+            Text(message.content.ifEmpty { "Thinking…" }, Modifier.padding(horizontal = 17.dp, vertical = 14.dp), lineHeight = 22.sp)
+        }
+    }
 }
 
-@Composable private fun FilesScreen(state: UiState, vm: ByakViewModel) {
-    val context = LocalContext.current; val picker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri -> uri?.let { val name = it.lastPathSegment?.substringAfterLast('/') ?: "document.txt"; val text = context.contentResolver.openInputStream(it)?.bufferedReader()?.use { reader -> reader.readText() }.orEmpty(); val type = context.contentResolver.getType(it).let { mime -> if (mime in listOf("text/plain","text/markdown","text/csv","application/json")) mime!! else "text/plain" }; vm.upload(name, type, text) } }
-    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(20.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) { item { Row(verticalAlignment = Alignment.CenterVertically) { Column(Modifier.weight(1f)) { Text("Knowledge files", fontSize = 25.sp, fontWeight = FontWeight.Black); Text("Private project context with source chunks", color = MaterialTheme.colorScheme.onSurfaceVariant) }; Button(onClick = { picker.launch("text/*") }) { Icon(Icons.Outlined.UploadFile, null); Spacer(Modifier.width(8.dp)); Text("Upload") } } }; if (state.files.isEmpty()) item { EmptyState(Icons.Outlined.FolderOpen, "No files yet", "Upload TXT, Markdown, CSV or JSON. PDF and DOCX run through the production document worker.") }; items(state.files) { file -> Card { ListItem(headlineContent = { Text(file.name, fontWeight = FontWeight.SemiBold) }, supportingContent = { Text("${file.mimeType} · ${file.chunkCount} searchable chunks") }, leadingContent = { Icon(Icons.Outlined.Description, null) }, trailingContent = { IconButton(onClick = { vm.removeFile(file.id) }) { Icon(Icons.Outlined.Delete, "Delete") } }) } } }
+@Composable
+private fun AgentsScreen(state: UiState, vm: ByakViewModel, openModels: () -> Unit) {
+    val templates = listOf(
+        AgentTemplate("Deep Research", "Search, compare sources and create a clear report", Icons.Outlined.TravelExplore, Color(0xFF6C5CE7)),
+        AgentTemplate("Builder", "Plan products, apps and complete implementation tasks", Icons.Outlined.Handyman, Color(0xFF007F73)),
+        AgentTemplate("Business Planner", "Validate ideas, pricing, risks and next steps", Icons.Outlined.QueryStats, Color(0xFFE17A32)),
+        AgentTemplate("Study Coach", "Learn step by step with examples and practice", Icons.Outlined.School, Color(0xFF3478C0)),
+        AgentTemplate("Custom Agent", "Give BYAK a goal and let it plan the work", Icons.Outlined.AutoMode, Color(0xFF9B59B6))
+    )
+    var selected by remember { mutableStateOf<AgentTemplate?>(null) }
+    LazyColumn(
+        Modifier.fillMaxSize(), contentPadding = PaddingValues(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        item {
+            Text("Agents", fontSize = 30.sp, fontWeight = FontWeight.Black)
+            Text("Give BYAK a goal. It will plan, research, reason and deliver.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Spacer(Modifier.height(10.dp))
+        }
+        if (state.providers.isEmpty()) item {
+            Card(onClick = openModels, colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer), shape = RoundedCornerShape(22.dp)) {
+                ListItem(
+                    headlineContent = { Text("Connect an AI first", fontWeight = FontWeight.Bold) },
+                    supportingContent = { Text("One provider powers chat and every agent") },
+                    leadingContent = { ByakMark(42.dp) }, trailingContent = { Icon(Icons.Outlined.ArrowForward, null) },
+                    colors = ListItemDefaults.colors(containerColor = Color.Transparent)
+                )
+            }
+        }
+        items(templates) { template ->
+            Card(onClick = { selected = template }, shape = RoundedCornerShape(22.dp), enabled = !state.agentRunning && state.providers.isNotEmpty()) {
+                Row(Modifier.fillMaxWidth().padding(18.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Surface(shape = RoundedCornerShape(16.dp), color = template.tint.copy(alpha = .14f)) {
+                        Icon(template.icon, null, Modifier.padding(13.dp), tint = template.tint)
+                    }
+                    Column(Modifier.weight(1f).padding(horizontal = 14.dp)) {
+                        Text(template.name, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                        Text(template.detail, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    Icon(Icons.Outlined.ChevronRight, null)
+                }
+            }
+        }
+        if (state.agentEvents.isNotEmpty()) {
+            item { Text(if (state.agentRunning) "Agent working…" else "Latest result", fontSize = 20.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 12.dp)) }
+            items(state.agentEvents) { event -> AgentEventCard(event, state.agentRunning) }
+        }
+    }
+    selected?.let { template ->
+        AgentGoalDialog(template, close = { selected = null }) { goal ->
+            vm.runAgent(template.name, goal)
+            selected = null
+        }
+    }
 }
 
-@Composable private fun ProjectsScreen(state: UiState, vm: ByakViewModel) { var show by remember { mutableStateOf(false) }; LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(20.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) { item { Row(verticalAlignment = Alignment.CenterVertically) { Column(Modifier.weight(1f)) { Text("Projects", fontSize = 25.sp, fontWeight = FontWeight.Black); Text("Isolated chats, files and instructions", color = MaterialTheme.colorScheme.onSurfaceVariant) }; Button(onClick = { show = true }) { Icon(Icons.Outlined.Add, null); Text(" New") } } }; if (state.projects.isEmpty()) item { EmptyState(Icons.Outlined.Workspaces, "Build a workspace", "Group research, knowledge and chats by goal.") }; items(state.projects) { project -> Card { ListItem(headlineContent = { Text(project.name, fontWeight = FontWeight.Bold) }, supportingContent = { Text(project.description.ifBlank { "No description" }) }, leadingContent = { Icon(Icons.Outlined.Workspaces, null) }, trailingContent = { IconButton(onClick = { vm.removeProject(project.id) }) { Icon(Icons.Outlined.Delete, "Delete") } }) } } }; if (show) ProjectDialog({ show = false }) { n, d -> vm.addProject(n, d); show = false } }
+@Composable
+private fun AgentEventCard(event: AgentEvent, running: Boolean) {
+    val final = event.completed
+    Surface(shape = RoundedCornerShape(18.dp), color = if (final) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant) {
+        Row(Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.Top) {
+            if (final) Icon(Icons.Outlined.CheckCircle, null, tint = MaterialTheme.colorScheme.primary)
+            else if (running) CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+            else Icon(Icons.Outlined.Check, null)
+            Column(Modifier.padding(start = 12.dp)) {
+                Text(event.stage, fontWeight = FontWeight.Bold)
+                Text(event.message, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+    }
 }
 
-@Composable private fun ProjectDialog(close: () -> Unit, create: (String,String) -> Unit) { var name by remember { mutableStateOf("") }; var description by remember { mutableStateOf("") }; AlertDialog(onDismissRequest = close, confirmButton = { Button(onClick = { create(name, description) }, enabled = name.isNotBlank()) { Text("Create") } }, dismissButton = { TextButton(close) { Text("Cancel") } }, title = { Text("New project") }, text = { Column(verticalArrangement = Arrangement.spacedBy(10.dp)) { OutlinedTextField(name, { name = it }, label = { Text("Name") }); OutlinedTextField(description, { description = it }, label = { Text("Description") }) } }) }
-
-@Composable private fun ModelsScreen(state: UiState, vm: ByakViewModel) { var show by remember { mutableStateOf(false) }; LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(20.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) { item { Row(verticalAlignment = Alignment.CenterVertically) { Column(Modifier.weight(1f)) { Text("AI providers", fontSize = 25.sp, fontWeight = FontWeight.Black); Text("Your keys are encrypted and always masked", color = MaterialTheme.colorScheme.onSurfaceVariant) }; Button(onClick = { show = true }) { Icon(Icons.Outlined.Add, null); Text(" Connect") } } }; if (state.providers.isEmpty()) item { EmptyState(Icons.Outlined.Key, "Bring your API key", "OpenAI, Claude, Gemini, OpenRouter, Groq, Mistral, DeepSeek or custom endpoints.") }; items(state.providers) { p -> Card { ListItem(headlineContent = { Text(p.name, fontWeight = FontWeight.Bold) }, supportingContent = { Text("${p.defaultModel}\n${p.maskedKey}") }, leadingContent = { Icon(Icons.Outlined.Hub, null, tint = MaterialTheme.colorScheme.primary) }, trailingContent = { Row { IconButton(onClick = { vm.validateProvider(p.id) }) { Icon(Icons.Outlined.Verified, "Validate") }; IconButton(onClick = { vm.removeProvider(p.id) }) { Icon(Icons.Outlined.Delete, "Remove") } } }) } }; item { Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer)) { ListItem(headlineContent = { Text("Local AI", fontWeight = FontWeight.Bold) }, supportingContent = { Text("Ollama · llama.cpp · On-device\nComing soon — no fake functionality") }, leadingContent = { Icon(Icons.Outlined.Laptop, null) }) } } }; if (show) ProviderDialog({ show = false }) { type, key, model, base -> vm.addProvider(type, key, model, base) { show = false } } }
+@Composable
+private fun AgentGoalDialog(template: AgentTemplate, close: () -> Unit, run: (String) -> Unit) {
+    var goal by remember { mutableStateOf("") }
+    AlertDialog(
+        onDismissRequest = close,
+        icon = { Icon(template.icon, null, tint = template.tint) },
+        title = { Text(template.name) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text("Describe the outcome you want. BYAK will choose the steps.")
+                OutlinedTextField(goal, { goal = it }, label = { Text("Your goal") }, minLines = 4, maxLines = 8, shape = RoundedCornerShape(18.dp))
+            }
+        },
+        confirmButton = { Button(onClick = { run(goal.trim()) }, enabled = goal.isNotBlank()) { Text("Start agent") } },
+        dismissButton = { TextButton(onClick = close) { Text("Cancel") } }
+    )
 }
 
-@Composable private fun ProviderDialog(close: () -> Unit, save: (String,String,String,String) -> Unit) { val types = listOf("openai","anthropic","gemini","openrouter","groq","mistral","deepseek","custom"); var type by remember { mutableStateOf("openai") }; var key by remember { mutableStateOf("") }; var model by remember { mutableStateOf("gpt-4.1-mini") }; var base by remember { mutableStateOf("") }; AlertDialog(onDismissRequest = close, confirmButton = { Button(onClick = { save(type,key,model,base) }, enabled = key.isNotBlank() && model.isNotBlank()) { Text("Save securely") } }, dismissButton = { TextButton(close) { Text("Cancel") } }, title = { Text("Connect provider") }, text = { Column(verticalArrangement = Arrangement.spacedBy(10.dp)) { Text("Provider", style = MaterialTheme.typography.labelMedium); FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) { types.forEach { FilterChip(selected = type == it, onClick = { type = it }, label = { Text(it) }) } }; OutlinedTextField(key, { key = it }, label = { Text("API key") }, visualTransformation = PasswordVisualTransformation()); OutlinedTextField(model, { model = it }, label = { Text("Default model") }); if (type == "custom") OutlinedTextField(base, { base = it }, label = { Text("HTTPS endpoint") }); Text("The full key cannot be viewed again after saving.", style = MaterialTheme.typography.bodySmall) } }) }
-
-@Composable private fun SettingsScreen(api: ApiClient, sessions: SessionStore, session: Session, state: UiState, models: () -> Unit) { val scope = rememberCoroutineScope(); var delete by remember { mutableStateOf(false) }; LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) { item { Text("Account", fontSize = 25.sp, fontWeight = FontWeight.Black) }; item { Card { ListItem(headlineContent = { Text(session.name, fontWeight = FontWeight.Bold) }, supportingContent = { Text(session.email) }, leadingContent = { Icon(Icons.Outlined.AccountCircle, null) }) } }; item { SettingsRow(Icons.Outlined.Key, "Provider security", "${state.providers.size} encrypted connection(s)", models) }; item { SettingsRow(Icons.Outlined.Payments, "Free plan", "Upgrade architecture ready for $1 monthly / $10 annual") {} }; item { SettingsRow(Icons.Outlined.Memory, "Memory", "Off by default · view and clear anytime") {} }; item { SettingsRow(Icons.Outlined.PrivacyTip, "Privacy & data", "Export or delete your account data") {} }; item { OutlinedButton(onClick = { scope.launch { api.logout() } }, Modifier.fillMaxWidth()) { Icon(Icons.Outlined.Logout, null); Text(" Sign out") } }; item { TextButton(onClick = { delete = true }, Modifier.fillMaxWidth(), colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error)) { Text("Delete account and data") } } }; if (delete) AlertDialog(onDismissRequest = { delete = false }, title = { Text("Delete your account?") }, text = { Text("This permanently removes sessions, provider connections, chats, files, projects and memory.") }, confirmButton = { Button(onClick = { scope.launch { api.deleteAccount() } }, colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)) { Text("Delete permanently") } }, dismissButton = { TextButton(onClick = { delete = false }) { Text("Cancel") } }) }
+@Composable
+private fun LibraryScreen(state: UiState, vm: ByakViewModel) {
+    val context = LocalContext.current
+    var showProject by remember { mutableStateOf(false) }
+    val picker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+        uri ?: return@rememberLauncherForActivityResult
+        val name = uri.lastPathSegment?.substringAfterLast('/') ?: "document.txt"
+        val text = context.contentResolver.openInputStream(uri)?.bufferedReader()?.use { it.readText() }.orEmpty()
+        val type = context.contentResolver.getType(uri) ?: "text/plain"
+        vm.upload(name, type, text)
+    }
+    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(20.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        item { Text("Library", fontSize = 30.sp, fontWeight = FontWeight.Black); Text("Everything BYAK can use to help you.", color = MaterialTheme.colorScheme.onSurfaceVariant) }
+        item {
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.padding(vertical = 10.dp)) {
+                Button(onClick = { picker.launch("text/*") }, Modifier.weight(1f)) { Icon(Icons.Outlined.UploadFile, null); Text(" Add file") }
+                OutlinedButton(onClick = { showProject = true }, Modifier.weight(1f)) { Icon(Icons.Outlined.CreateNewFolder, null); Text(" Project") }
+            }
+        }
+        item { SectionTitle("Files", state.files.size) }
+        if (state.files.isEmpty()) item { FriendlyEmpty(Icons.Outlined.Description, "No files yet", "Add notes or documents so BYAK can use them in answers.") }
+        items(state.files) { file ->
+            ListItem(
+                headlineContent = { Text(file.name) }, supportingContent = { Text("${file.chunkCount} knowledge sections") },
+                leadingContent = { Icon(Icons.Outlined.Description, null, tint = MaterialTheme.colorScheme.primary) },
+                trailingContent = { IconButton(onClick = { vm.removeFile(file.id) }) { Icon(Icons.Outlined.DeleteOutline, "Delete") } },
+                modifier = Modifier.clip(RoundedCornerShape(16.dp)).background(MaterialTheme.colorScheme.surfaceVariant)
+            )
+        }
+        item { SectionTitle("Projects", state.projects.size) }
+        if (state.projects.isEmpty()) item { FriendlyEmpty(Icons.Outlined.FolderOpen, "No projects yet", "Group your work into simple project spaces.") }
+        items(state.projects) { project ->
+            ListItem(
+                headlineContent = { Text(project.name, fontWeight = FontWeight.SemiBold) }, supportingContent = { Text(project.description.ifBlank { "BYAK project" }) },
+                leadingContent = { Icon(Icons.Outlined.Folder, null) },
+                trailingContent = { IconButton(onClick = { vm.removeProject(project.id) }) { Icon(Icons.Outlined.DeleteOutline, "Delete") } }
+            )
+        }
+    }
+    if (showProject) ProjectDialog(close = { showProject = false }) { name, detail -> vm.addProject(name, detail); showProject = false }
 }
 
-@Composable private fun SettingsRow(icon: ImageVector, title: String, detail: String, click: () -> Unit) { Card(Modifier.fillMaxWidth().clickable(onClick = click)) { ListItem(headlineContent = { Text(title, fontWeight = FontWeight.SemiBold) }, supportingContent = { Text(detail) }, leadingContent = { Icon(icon, null) }, trailingContent = { Icon(Icons.Outlined.ChevronRight, null) }) } }
-@Composable private fun EmptyState(icon: ImageVector, title: String, detail: String) { Column(Modifier.fillMaxWidth().padding(vertical = 40.dp), horizontalAlignment = Alignment.CenterHorizontally) { Icon(icon, null, Modifier.size(52.dp), tint = MaterialTheme.colorScheme.primary); Spacer(Modifier.height(14.dp)); Text(title, fontSize = 20.sp, fontWeight = FontWeight.Bold); Text(detail, Modifier.padding(top = 6.dp), color = MaterialTheme.colorScheme.onSurfaceVariant) } }
+@Composable
+private fun SectionTitle(label: String, count: Int) {
+    Row(Modifier.fillMaxWidth().padding(top = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+        Text(label, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+        Spacer(Modifier.weight(1f))
+        Surface(shape = CircleShape, color = MaterialTheme.colorScheme.surfaceVariant) { Text(count.toString(), Modifier.padding(horizontal = 10.dp, vertical = 4.dp)) }
+    }
+}
+
+@Composable
+private fun FriendlyEmpty(icon: ImageVector, title: String, detail: String) {
+    Column(Modifier.fillMaxWidth().padding(vertical = 20.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+        Icon(icon, null, Modifier.size(42.dp), tint = MaterialTheme.colorScheme.primary)
+        Text(title, fontWeight = FontWeight.Bold, fontSize = 18.sp)
+        Text(detail, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+}
+
+@Composable
+private fun ProjectDialog(close: () -> Unit, create: (String, String) -> Unit) {
+    var name by remember { mutableStateOf("") }
+    var detail by remember { mutableStateOf("") }
+    AlertDialog(
+        onDismissRequest = close, title = { Text("New project") },
+        text = { Column(verticalArrangement = Arrangement.spacedBy(8.dp)) { OutlinedTextField(name, { name = it }, label = { Text("Project name") }); OutlinedTextField(detail, { detail = it }, label = { Text("What is it about?") }) } },
+        confirmButton = { Button(onClick = { create(name.trim(), detail.trim()) }, enabled = name.isNotBlank()) { Text("Create") } },
+        dismissButton = { TextButton(onClick = close) { Text("Cancel") } }
+    )
+}
+
+@Composable
+private fun ProfileScreen(state: UiState, api: ApiClient, billing: BillingState, openModels: () -> Unit, openPlans: () -> Unit) {
+    val scope = rememberCoroutineScope()
+    var clear by remember { mutableStateOf(false) }
+    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        item { Text("You", fontSize = 30.sp, fontWeight = FontWeight.Black); Text("Your private BYAK space", color = MaterialTheme.colorScheme.onSurfaceVariant) }
+        item {
+            Card(onClick = openPlans, shape = RoundedCornerShape(24.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)) {
+                Row(Modifier.fillMaxWidth().padding(20.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Outlined.WorkspacePremium, null, Modifier.size(34.dp), tint = MaterialTheme.colorScheme.primary)
+                    Column(Modifier.weight(1f).padding(horizontal = 14.dp)) {
+                        Text(if (billing.active) "BYAK Pro" else "Unlock BYAK Pro", fontSize = 19.sp, fontWeight = FontWeight.Bold)
+                        Text(if (billing.active) "Your subscription is active" else "More agents, longer work and premium tools")
+                    }
+                    Icon(Icons.Outlined.ChevronRight, null)
+                }
+            }
+        }
+        item { SettingsRow(Icons.Outlined.Bolt, "AI model", state.providers.firstOrNull()?.name ?: "Connect a provider", openModels) }
+        item { SettingsRow(Icons.Outlined.Security, "Privacy", "Keys encrypted by Android Keystore") {} }
+        item { SettingsRow(Icons.Outlined.CloudOff, "Device-only mode", "No BYAK server required") {} }
+        item { SettingsRow(Icons.Outlined.Info, "Version", "BYAK AI 0.3.0") {} }
+        item { TextButton(onClick = { clear = true }, Modifier.fillMaxWidth()) { Text("Clear all local data", color = MaterialTheme.colorScheme.error) } }
+    }
+    if (clear) AlertDialog(
+        onDismissRequest = { clear = false }, title = { Text("Clear everything?") },
+        text = { Text("This permanently removes API keys, chats, files and projects from this phone.") },
+        confirmButton = { Button(onClick = { scope.launch { api.deleteAccount(); clear = false } }) { Text("Clear") } },
+        dismissButton = { TextButton(onClick = { clear = false }) { Text("Cancel") } }
+    )
+}
+
+@Composable
+private fun SettingsRow(icon: ImageVector, title: String, detail: String, click: () -> Unit) {
+    ListItem(
+        headlineContent = { Text(title, fontWeight = FontWeight.SemiBold) }, supportingContent = { Text(detail) },
+        leadingContent = { Icon(icon, null) }, trailingContent = { Icon(Icons.Outlined.ChevronRight, null) },
+        modifier = Modifier.clip(RoundedCornerShape(18.dp)).clickable(onClick = click)
+    )
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun ModelSheet(state: UiState, vm: ByakViewModel, close: () -> Unit) {
+    var add by remember { mutableStateOf(false) }
+    ModalBottomSheet(onDismissRequest = close) {
+        Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp).padding(bottom = 28.dp)) {
+            Text("Choose your AI", fontSize = 26.sp, fontWeight = FontWeight.Black)
+            Text("One provider powers chat and agents. You can change it anytime.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Spacer(Modifier.height(14.dp))
+            state.providers.forEach { provider ->
+                ListItem(
+                    headlineContent = { Text(provider.name, fontWeight = FontWeight.Bold) },
+                    supportingContent = { Text("${provider.defaultModel} · ${provider.maskedKey}") },
+                    leadingContent = { Icon(Icons.Outlined.CheckCircle, null, tint = MaterialTheme.colorScheme.primary) },
+                    trailingContent = { IconButton(onClick = { vm.removeProvider(provider.id) }) { Icon(Icons.Outlined.DeleteOutline, "Remove") } }
+                )
+            }
+            Button(onClick = { add = true }, Modifier.fillMaxWidth(), shape = RoundedCornerShape(18.dp)) {
+                Icon(Icons.Outlined.Add, null); Text(" Connect AI provider")
+            }
+            Text("Your key is encrypted on this device and sent only to the provider you choose.", style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 12.dp))
+        }
+    }
+    if (add) ProviderDialog(close = { add = false }) { type, key, model, base -> vm.addProvider(type, key, model, base) { add = false; close() } }
+}
+
+@Composable
+private fun ProviderDialog(close: () -> Unit, save: (String, String, String, String) -> Unit) {
+    val choices = listOf("openrouter" to "OpenRouter", "gemini" to "Gemini", "openai" to "OpenAI", "anthropic" to "Claude", "groq" to "Groq", "mistral" to "Mistral", "deepseek" to "DeepSeek", "custom" to "Other")
+    val defaults = mapOf("openrouter" to "google/gemini-2.5-flash", "gemini" to "gemini-2.5-flash", "openai" to "gpt-4.1-mini", "anthropic" to "claude-sonnet-4-20250514", "groq" to "llama-3.3-70b-versatile", "mistral" to "mistral-small-latest", "deepseek" to "deepseek-chat", "custom" to "")
+    var type by remember { mutableStateOf("openrouter") }
+    var key by remember { mutableStateOf("") }
+    var model by remember { mutableStateOf(defaults.getValue(type)) }
+    var base by remember { mutableStateOf("") }
+    AlertDialog(
+        onDismissRequest = close, title = { Text("Connect your AI") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text("Choose a provider, paste your key once, and BYAK handles the rest.")
+                Row(Modifier.horizontalScroll(rememberScrollState())) {
+                    choices.forEach { choice ->
+                        FilterChip(selected = type == choice.first, onClick = { type = choice.first; model = defaults[choice.first].orEmpty() }, label = { Text(choice.second) })
+                        Spacer(Modifier.width(7.dp))
+                    }
+                }
+                OutlinedTextField(key, { key = it }, label = { Text("API key") }, visualTransformation = PasswordVisualTransformation(), singleLine = true)
+                OutlinedTextField(model, { model = it }, label = { Text("Model") }, singleLine = true)
+                if (type == "custom") OutlinedTextField(base, { base = it }, label = { Text("HTTPS address") }, singleLine = true)
+            }
+        },
+        confirmButton = { Button(onClick = { save(type, key.trim(), model.trim(), base.trim()) }, enabled = key.isNotBlank() && model.isNotBlank()) { Text("Connect") } },
+        dismissButton = { TextButton(onClick = close) { Text("Cancel") } }
+    )
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun SubscriptionSheet(state: BillingState, manager: BillingManager, close: () -> Unit) {
+    val activity = LocalContext.current as? Activity
+    ModalBottomSheet(onDismissRequest = close) {
+        LazyColumn(Modifier.fillMaxWidth(), contentPadding = PaddingValues(horizontal = 20.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            item {
+                ByakMark(54.dp)
+                Spacer(Modifier.height(12.dp))
+                Text("BYAK Pro", fontSize = 30.sp, fontWeight = FontWeight.Black)
+                Text("For bigger goals and longer autonomous work.", fontSize = 17.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            item {
+                Column(verticalArrangement = Arrangement.spacedBy(9.dp)) {
+                    Benefit("More autonomous agent runs")
+                    Benefit("Longer chats and document context")
+                    Benefit("Premium agent templates")
+                    Benefit("Priority new features")
+                }
+            }
+            if (state.loading) item { LinearProgressIndicator(Modifier.fillMaxWidth()) }
+            items(state.offers) { offer ->
+                Card(shape = RoundedCornerShape(22.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)) {
+                    Row(Modifier.fillMaxWidth().padding(18.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) { Text(offer.title, fontWeight = FontWeight.Bold, fontSize = 18.sp); Text("${offer.price} ${offer.period}") }
+                        Button(onClick = { activity?.let { manager.purchase(it, offer.productId) } }) { Text("Choose") }
+                    }
+                }
+            }
+            state.message?.let { item { Text(it, color = MaterialTheme.colorScheme.onSurfaceVariant) } }
+            item {
+                OutlinedButton(onClick = manager::restore, Modifier.fillMaxWidth()) { Text("Restore purchases") }
+                Text("Subscriptions are processed by Google Play. Provider usage charges remain with your chosen AI provider.", style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(vertical = 12.dp))
+                Spacer(Modifier.height(24.dp))
+            }
+        }
+    }
+}
+
+@Composable
+private fun Benefit(text: String) {
+    Row(verticalAlignment = Alignment.CenterVertically) { Icon(Icons.Outlined.CheckCircle, null, tint = MaterialTheme.colorScheme.primary); Text(text, Modifier.padding(start = 10.dp)) }
+}
