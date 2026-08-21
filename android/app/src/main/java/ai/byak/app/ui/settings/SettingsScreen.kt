@@ -13,20 +13,24 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material.icons.outlined.CheckCircle
+import androidx.compose.material.icons.outlined.CloudDone
 import androidx.compose.material.icons.outlined.FolderOpen
 import androidx.compose.material.icons.outlined.Key
 import androidx.compose.material.icons.outlined.Logout
 import androidx.compose.material.icons.outlined.Refresh
+import androidx.compose.material.icons.outlined.Security
 import androidx.compose.material.icons.outlined.WorkspacePremium
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -41,6 +45,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -49,8 +54,11 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import ai.byak.app.billing.BillingManager
+import ai.byak.app.billing.PlanOffer
+import ai.byak.app.billing.PlayCatalogStatus
 import ai.byak.app.domain.model.AiProvider
 import ai.byak.app.ui.components.ByakLogo
+import ai.byak.app.ui.theme.CyberTeal
 import ai.byak.app.ui.theme.GlassCard
 import ai.byak.app.ui.theme.PremiumGold
 import coil3.compose.AsyncImage
@@ -72,7 +80,7 @@ fun SettingsScreen(viewModel: SettingsViewModel, openLibrary: () -> Unit) {
                     Column(Modifier.padding(start = 11.dp)) {
                         Text(state.session?.name ?: "You", fontSize = 26.sp, fontWeight = FontWeight.Black)
                         Text(
-                            if (state.session?.localOnly == true) "Private on-device session" else state.session?.email.orEmpty(),
+                            if (state.session?.localOnly == true) "Private on-device workspace" else state.session?.email.orEmpty(),
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
@@ -80,14 +88,26 @@ fun SettingsScreen(viewModel: SettingsViewModel, openLibrary: () -> Unit) {
                 Spacer(Modifier.height(10.dp))
             }
             item {
-                GlassCard(Modifier.fillMaxWidth(), onClick = { showProvider = true }) {
+                GlassCard(Modifier.fillMaxWidth(), onClick = {
+                    viewModel.clearConnectionMessage()
+                    showProvider = true
+                }) {
                     Row(Modifier.padding(18.dp), verticalAlignment = Alignment.CenterVertically) {
                         Icon(Icons.Outlined.AutoAwesome, null, tint = MaterialTheme.colorScheme.secondary)
                         Column(Modifier.weight(1f).padding(horizontal = 13.dp)) {
                             Text("AI connection", fontWeight = FontWeight.Bold, fontSize = 18.sp)
-                            Text("${state.provider.name.pretty()} · ${state.model}", maxLines = 1, overflow = TextOverflow.Ellipsis, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text(
+                                "${state.provider.displayName()} · ${state.model}",
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
                         }
-                        Icon(Icons.Outlined.Key, null)
+                        Icon(
+                            if (state.hasKeyFor(state.provider)) Icons.Outlined.CloudDone else Icons.Outlined.Key,
+                            null,
+                            tint = if (state.hasKeyFor(state.provider)) CyberTeal else MaterialTheme.colorScheme.onSurface,
+                        )
                     }
                 }
             }
@@ -97,94 +117,169 @@ fun SettingsScreen(viewModel: SettingsViewModel, openLibrary: () -> Unit) {
                         Icon(Icons.Outlined.FolderOpen, null, tint = MaterialTheme.colorScheme.primary)
                         Column(Modifier.padding(start = 13.dp)) {
                             Text("Private library", fontWeight = FontWeight.Bold, fontSize = 18.sp)
-                            Text("Give chats and agents your own reference material.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text("Ground chats and agents in your own documents.", color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                     }
                 }
             }
+            item { ProCard(state, context as? Activity, viewModel) }
             item {
-                GlassCard(Modifier.fillMaxWidth()) {
-                    Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Outlined.WorkspacePremium, null, tint = PremiumGold)
-                            Column(Modifier.padding(start = 12.dp)) {
-                                Text(if (state.billing.active) "BYAK Pro active" else "BYAK Pro", fontWeight = FontWeight.Bold, fontSize = 18.sp)
-                                Text("Server-verified Google Play subscription", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            }
-                        }
-                        if (state.billing.verifying) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
-                                Text("  Verifying with Google Play…")
-                            }
-                        }
-                        state.billing.billingChoiceImageUrl?.let { url ->
-                            AsyncImage(model = url, contentDescription = "Google Play Billing choice", modifier = Modifier.fillMaxWidth().height(72.dp))
-                        }
-                        state.billing.message?.let { Text(it, color = MaterialTheme.colorScheme.onSurfaceVariant) }
-                        state.billing.offers.forEach { offer ->
-                            OutlinedButton(
-                                onClick = { (context as? Activity)?.let { viewModel.purchase(it, offer.productId) } },
-                                enabled = state.billing.ready && !state.billing.verifying && !state.billing.active,
-                                modifier = Modifier.fillMaxWidth(),
-                                shape = RoundedCornerShape(16.dp),
-                            ) { Text("${offer.title} · ${offer.price} ${offer.period}") }
-                        }
-                        TextButton(viewModel::restorePurchases, Modifier.align(Alignment.End)) {
-                            Icon(Icons.Outlined.Refresh, null)
-                            Text(" Restore purchases")
-                        }
-                    }
-                }
-            }
-            item {
-                OutlinedButton(onClick = viewModel::signOut, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(18.dp)) {
+                OutlinedButton(
+                    onClick = viewModel::signOut,
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(18.dp),
+                ) {
                     Icon(Icons.Outlined.Logout, null)
                     Text(" Sign out")
                 }
-                Text(
-                    "BYAK never bundles provider secrets in the APK. Keys you add are encrypted with Android Keystore.",
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    fontSize = 12.sp,
-                    modifier = Modifier.padding(12.dp),
-                )
+                Row(Modifier.padding(12.dp), verticalAlignment = Alignment.Top) {
+                    Icon(Icons.Outlined.Security, null, Modifier.size(16.dp), tint = CyberTeal)
+                    Text(
+                        "  Provider keys are encrypted by Android Keystore and never bundled inside BYAK.",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        fontSize = 12.sp,
+                    )
+                }
             }
         }
     }
-    if (showProvider) ProviderDialog(state, { showProvider = false }) { provider, key, model ->
-        viewModel.saveProvider(provider, key, model)
-        showProvider = false
+    if (showProvider) {
+        ProviderDialog(
+            state = state,
+            dismiss = {
+                viewModel.clearConnectionMessage()
+                showProvider = false
+            },
+            save = viewModel::saveAndTestProvider,
+        )
     }
 }
 
 @Composable
-private fun ProviderDialog(state: SettingsUiState, dismiss: () -> Unit, save: (AiProvider, String, String) -> Unit) {
+private fun ProCard(state: SettingsUiState, activity: Activity?, viewModel: SettingsViewModel) {
+    val fallbackPlans = listOf(
+        PlanOffer(BillingManager.MONTHLY, "Monthly", "$1.00", "per month"),
+        PlanOffer(BillingManager.ANNUAL, "Annual", "$10.00", "per year"),
+    )
+    val plans = fallbackPlans.map { fallback ->
+        state.billing.offers.firstOrNull { it.productId == fallback.productId } ?: fallback
+    }
+    GlassCard(Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Outlined.WorkspacePremium, null, tint = PremiumGold)
+                Column(Modifier.weight(1f).padding(start = 12.dp)) {
+                    Text(if (state.billing.active) "BYAK Pro active" else "BYAK Pro", fontWeight = FontWeight.Bold, fontSize = 19.sp)
+                    Text("More agent capacity. Longer context. Priority workflows.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                if (state.billing.active) Icon(Icons.Outlined.CheckCircle, null, tint = CyberTeal)
+            }
+
+            Text("✓ More background agent runs   ✓ Larger document context\n✓ Premium workflows              ✓ Future Pro upgrades", fontSize = 13.sp)
+            HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.35f))
+
+            if (state.billing.loading || state.billing.verifying) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                    Text(if (state.billing.verifying) "  Verifying securely…" else "  Connecting to Google Play…")
+                }
+            }
+
+            state.billing.billingChoiceImageUrl?.let { url ->
+                AsyncImage(
+                    model = url,
+                    contentDescription = "Google Play Billing choice",
+                    modifier = Modifier.fillMaxWidth().height(72.dp),
+                )
+            }
+
+            plans.forEach { plan ->
+                val available = state.billing.offers.any { it.productId == plan.productId }
+                PlanRow(plan, available, state.billing.active) {
+                    activity?.let { viewModel.purchase(it, plan.productId) }
+                }
+            }
+
+            state.billing.message?.let { message ->
+                Text(message, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp)
+            }
+            if (state.billing.catalogStatus == PlayCatalogStatus.NOT_PUBLISHED) {
+                Text(
+                    "Checkout is intentionally disabled in sideloaded APKs. The signed AAB must be installed from a Play testing track with both subscription base plans active.",
+                    color = PremiumGold,
+                    fontSize = 12.sp,
+                )
+            }
+            if (state.session?.localOnly == true && state.billing.offers.isNotEmpty()) {
+                Text(
+                    "Cloud sign-in is required before purchase so Pro can be server-verified and restored on another device.",
+                    color = PremiumGold,
+                    fontSize = 12.sp,
+                )
+            }
+            TextButton(
+                onClick = viewModel::restorePurchases,
+                enabled = state.billing.ready && !state.billing.verifying,
+                modifier = Modifier.align(Alignment.End),
+            ) {
+                Icon(Icons.Outlined.Refresh, null)
+                Text(" Restore purchases")
+            }
+        }
+    }
+}
+
+@Composable
+private fun PlanRow(plan: PlanOffer, available: Boolean, active: Boolean, purchase: () -> Unit) {
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f)) {
+            Text(plan.title.removePrefix("BYAK Pro "), fontWeight = FontWeight.Bold)
+            Text("${plan.price} ${plan.period}", color = PremiumGold, fontWeight = FontWeight.SemiBold)
+        }
+        Button(
+            onClick = purchase,
+            enabled = available && !active,
+            shape = RoundedCornerShape(14.dp),
+        ) {
+            Text(when {
+                active -> "Active"
+                available -> "Choose"
+                else -> "Play only"
+            })
+        }
+    }
+}
+
+@Composable
+private fun ProviderDialog(
+    state: SettingsUiState,
+    dismiss: () -> Unit,
+    save: (AiProvider, String, String) -> Unit,
+) {
     var provider by remember { mutableStateOf(state.provider) }
     var key by remember { mutableStateOf("") }
     var model by remember(provider) { mutableStateOf(provider.defaultModel()) }
-    val hasExisting = when (provider) {
-        AiProvider.OPENAI -> state.hasOpenAi
-        AiProvider.ANTHROPIC -> state.hasAnthropic
-        AiProvider.GEMINI -> state.hasGemini
-    }
+    val hasExisting = state.hasKeyFor(provider)
     AlertDialog(
-        onDismissRequest = dismiss,
+        onDismissRequest = { if (!state.testingConnection) dismiss() },
         icon = { Icon(Icons.Outlined.Key, null) },
         title = { Text("Connect your AI") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Text("Choose one provider. You can change it anytime.", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(7.dp)) {
-                    AiProvider.entries.forEach { item ->
+                Text("Choose a provider, then BYAK will verify the key before using it.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                LazyRow(horizontalArrangement = Arrangement.spacedBy(7.dp)) {
+                    items(AiProvider.entries, key = { it.name }) { item ->
                         AssistChip(
                             onClick = { provider = item; model = item.defaultModel(); key = "" },
-                            label = { Text(item.name.pretty()) },
-                            leadingIcon = if (provider == item) ({ Icon(Icons.Outlined.CheckCircle, null, Modifier.size(17.dp)) }) else null,
+                            label = { Text(item.displayName()) },
+                            leadingIcon = if (provider == item) ({
+                                Icon(Icons.Outlined.CheckCircle, null, Modifier.size(17.dp))
+                            }) else null,
                         )
                     }
                 }
                 AnimatedVisibility(hasExisting) {
-                    Text("A key is already stored. Leave the field blank to keep it.", color = MaterialTheme.colorScheme.secondary, fontSize = 12.sp)
+                    Text("A key is already stored. Leave this blank to test and keep it.", color = CyberTeal, fontSize = 12.sp)
                 }
                 OutlinedTextField(
                     value = key,
@@ -193,20 +288,86 @@ private fun ProviderDialog(state: SettingsUiState, dismiss: () -> Unit, save: (A
                     label = { Text(if (hasExisting) "Replace API key (optional)" else "API key") },
                     visualTransformation = PasswordVisualTransformation(),
                     singleLine = true,
+                    enabled = !state.testingConnection,
                     shape = RoundedCornerShape(16.dp),
                 )
-                OutlinedTextField(model, { model = it }, Modifier.fillMaxWidth(), label = { Text("Model") }, singleLine = true, shape = RoundedCornerShape(16.dp))
-                Text("The key is sent only to ${provider.name.pretty()}'s API from this device.", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
+                OutlinedTextField(
+                    value = model,
+                    onValueChange = { model = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text("Model") },
+                    supportingText = { Text(provider.modelHint()) },
+                    singleLine = true,
+                    enabled = !state.testingConnection,
+                    shape = RoundedCornerShape(16.dp),
+                )
+                state.connectionMessage?.let { message ->
+                    Row(verticalAlignment = Alignment.Top) {
+                        if (state.testingConnection) {
+                            CircularProgressIndicator(Modifier.size(17.dp), strokeWidth = 2.dp)
+                        } else {
+                            Icon(
+                                if (state.connectionSucceeded == true) Icons.Outlined.CheckCircle else Icons.Outlined.Key,
+                                null,
+                                Modifier.size(18.dp),
+                                tint = if (state.connectionSucceeded == true) CyberTeal else MaterialTheme.colorScheme.error,
+                            )
+                        }
+                        Text(
+                            "  $message",
+                            color = when (state.connectionSucceeded) {
+                                true -> CyberTeal
+                                false -> MaterialTheme.colorScheme.error
+                                null -> MaterialTheme.colorScheme.onSurfaceVariant
+                            },
+                            fontSize = 12.sp,
+                        )
+                    }
+                }
+                Text(
+                    "The key is sent only to ${provider.displayName()}'s official API and remains encrypted on this device.",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    fontSize = 12.sp,
+                )
             }
         },
-        confirmButton = { Button({ save(provider, key, model) }, enabled = model.isNotBlank() && (hasExisting || key.isNotBlank())) { Text("Save") } },
-        dismissButton = { TextButton(dismiss) { Text("Cancel") } },
+        confirmButton = {
+            Button(
+                onClick = { save(provider, key, model) },
+                enabled = !state.testingConnection && model.isNotBlank() && (hasExisting || key.isNotBlank()),
+            ) {
+                if (state.testingConnection) CircularProgressIndicator(Modifier.size(17.dp), strokeWidth = 2.dp)
+                else Text(if (state.connectionSucceeded == true) "Test again" else "Save & test")
+            }
+        },
+        dismissButton = { TextButton(dismiss, enabled = !state.testingConnection) { Text("Done") } },
     )
 }
 
-private fun String.pretty() = lowercase().replaceFirstChar(Char::uppercase)
-private fun AiProvider.defaultModel() = when (this) {
+private fun SettingsUiState.hasKeyFor(provider: AiProvider): Boolean = when (provider) {
+    AiProvider.OPENAI -> hasOpenAi
+    AiProvider.OPENROUTER -> hasOpenRouter
+    AiProvider.ANTHROPIC -> hasAnthropic
+    AiProvider.GEMINI -> hasGemini
+}
+
+private fun AiProvider.displayName(): String = when (this) {
+    AiProvider.OPENAI -> "OpenAI"
+    AiProvider.OPENROUTER -> "OpenRouter"
+    AiProvider.ANTHROPIC -> "Claude"
+    AiProvider.GEMINI -> "Gemini"
+}
+
+private fun AiProvider.defaultModel(): String = when (this) {
     AiProvider.OPENAI -> "gpt-5-mini"
+    AiProvider.OPENROUTER -> "openrouter/auto"
     AiProvider.ANTHROPIC -> "claude-sonnet-4-5"
     AiProvider.GEMINI -> "gemini-2.5-flash"
+}
+
+private fun AiProvider.modelHint(): String = when (this) {
+    AiProvider.OPENROUTER -> "Use openrouter/auto or a provider/model ID from OpenRouter."
+    AiProvider.OPENAI -> "Example: gpt-5-mini"
+    AiProvider.ANTHROPIC -> "Example: claude-sonnet-4-5"
+    AiProvider.GEMINI -> "Example: gemini-2.5-flash"
 }
