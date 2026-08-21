@@ -52,28 +52,47 @@ class BillingManager @Inject constructor(
     }
 
     private fun connect() {
+        mutableState.update {
+            it.copy(loading = true, catalogStatus = PlayCatalogStatus.CONNECTING, message = null)
+        }
         client.startConnection(object : BillingClientStateListener {
             override fun onBillingSetupFinished(result: BillingResult) {
                 when (result.responseCode) {
                     BillingClient.BillingResponseCode.OK -> {
-                        mutableState.update { it.copy(ready = true, loading = true, message = null) }
+                        mutableState.update {
+                            it.copy(
+                                ready = true,
+                                loading = true,
+                                catalogStatus = PlayCatalogStatus.CONNECTING,
+                                message = null,
+                            )
+                        }
                         queryProducts()
                         restorePurchases()
                         queryBillingChoiceInfo()
                     }
                     BillingClient.BillingResponseCode.BILLING_UNAVAILABLE -> mutableState.value = BillingState(
                         loading = false,
+                        catalogStatus = PlayCatalogStatus.UNAVAILABLE,
                         message = "Google Play Billing is unavailable or blocked by this device's system software.",
                     )
                     else -> mutableState.value = BillingState(
                         loading = false,
-                        message = result.debugMessage.ifBlank { "Google Play Billing is unavailable" },
+                        catalogStatus = PlayCatalogStatus.ERROR,
+                        message = result.debugMessage.ifBlank { "Google Play Billing is unavailable." },
                     )
                 }
             }
 
             override fun onBillingServiceDisconnected() {
-                mutableState.update { it.copy(ready = false, message = "Reconnecting to Google Play…") }
+                mutableState.update {
+                    it.copy(
+                        ready = false,
+                        loading = true,
+                        catalogStatus = PlayCatalogStatus.CONNECTING,
+                        message = "Reconnecting to Google Play…",
+                    )
+                }
             }
         })
     }
@@ -103,12 +122,15 @@ class BillingManager @Inject constructor(
                     price = phase.formattedPrice,
                     period = if (product.productId == MONTHLY) "per month" else "per year",
                 )
-            }
+            }.sortedBy { it.productId != MONTHLY }
+            val published = offers.isNotEmpty()
             mutableState.update {
                 it.copy(
                     loading = false,
                     offers = offers,
-                    message = if (offers.isEmpty()) "Plans become available after both subscriptions are activated in this app's Play Console test track." else null,
+                    catalogStatus = if (published) PlayCatalogStatus.READY else PlayCatalogStatus.NOT_PUBLISHED,
+                    message = if (published) null else
+                        "Plans are not published for this installation. Install BYAK from its Google Play internal-test or production listing to enable checkout.",
                 )
             }
         }
@@ -131,6 +153,7 @@ class BillingManager @Inject constructor(
     }
 
     private fun restorePurchases() {
+        if (!client.isReady) return
         client.queryPurchasesAsync(
             QueryPurchasesParams.newBuilder().setProductType(BillingClient.ProductType.SUBS).build(),
         ) { result, purchases ->
@@ -141,17 +164,21 @@ class BillingManager @Inject constructor(
 
     fun purchase(activity: Activity, productId: String) {
         if (secureStore.snapshot().localSession) {
-            mutableState.update { it.copy(message = "Sign in with a cloud account before purchasing so your subscription can be securely verified and restored.") }
+            mutableState.update {
+                it.copy(message = "A cloud account is required so BYAK can verify and restore your subscription securely. Sign out, then choose cloud login.")
+            }
             return
         }
         val product = details[productId]
         if (product == null) {
-            mutableState.update { it.copy(message = "This plan is not available in the current Play Store test track.") }
+            mutableState.update {
+                it.copy(message = "This plan is not available for this Play Store installation. Use the internal-test Play link, then try again.")
+            }
             return
         }
         val offerToken = product.subscriptionOfferDetails?.firstOrNull()?.offerToken
         if (offerToken.isNullOrBlank()) {
-            mutableState.update { it.copy(message = "No eligible subscription offer is configured for this account.") }
+            mutableState.update { it.copy(message = "No eligible base plan is configured for this Google Play account.") }
             return
         }
         val productParams = BillingFlowParams.ProductDetailsParams.newBuilder()
@@ -167,12 +194,19 @@ class BillingManager @Inject constructor(
         )
     }
 
-    fun restore() = restorePurchases()
+    fun restore() {
+        if (!client.isReady) {
+            mutableState.update { it.copy(message = "Google Play is still connecting. Try again in a moment.") }
+            return
+        }
+        mutableState.update { it.copy(message = "Checking your Google Play purchases…") }
+        restorePurchases()
+    }
 
     override fun onPurchasesUpdated(result: BillingResult, purchases: MutableList<Purchase>?) {
         when (result.responseCode) {
             BillingClient.BillingResponseCode.OK -> processPurchases(purchases.orEmpty())
-            BillingClient.BillingResponseCode.USER_CANCELED -> mutableState.update { it.copy(message = "Purchase cancelled") }
+            BillingClient.BillingResponseCode.USER_CANCELED -> mutableState.update { it.copy(message = "Purchase cancelled.") }
             else -> handleBillingError(result)
         }
     }
@@ -187,11 +221,17 @@ class BillingManager @Inject constructor(
                 verifier.verify(productId, purchase.purchaseToken)
                     .onSuccess {
                         if (!purchase.isAcknowledged) acknowledge(purchase)
-                        mutableState.update { state -> state.copy(verifying = false, active = true, message = "BYAK Pro is active") }
+                        mutableState.update { state ->
+                            state.copy(verifying = false, active = true, message = "BYAK Pro is active.")
+                        }
                     }
                     .onFailure { error ->
                         mutableState.update { state ->
-                            state.copy(verifying = false, active = false, message = error.message ?: "Purchase could not be verified")
+                            state.copy(
+                                verifying = false,
+                                active = false,
+                                message = error.message ?: "The server could not verify this purchase.",
+                            )
                         }
                     }
             }
@@ -208,12 +248,27 @@ class BillingManager @Inject constructor(
         if (ignoreSuccess && result.responseCode == BillingClient.BillingResponseCode.OK) return
         val message = when (result.responseCode) {
             BillingClient.BillingResponseCode.OK -> null
-            BillingClient.BillingResponseCode.BILLING_UNAVAILABLE -> "Google Play Billing is unavailable or blocked by this device's system software."
-            BillingClient.BillingResponseCode.NETWORK_ERROR -> "Google Play could not connect. Check your internet connection and try again."
-            BillingClient.BillingResponseCode.ITEM_ALREADY_OWNED -> "This subscription is already owned. Tap Restore purchases."
+            BillingClient.BillingResponseCode.BILLING_UNAVAILABLE ->
+                "Google Play Billing is unavailable or blocked by this device's system software."
+            BillingClient.BillingResponseCode.NETWORK_ERROR ->
+                "Google Play could not connect. Check your internet connection and try again."
+            BillingClient.BillingResponseCode.ITEM_ALREADY_OWNED ->
+                "This subscription is already owned. Tap Restore purchases."
+            BillingClient.BillingResponseCode.ITEM_UNAVAILABLE ->
+                "This subscription is not active for your country, account, or testing track."
             else -> result.debugMessage.ifBlank { "Google Play Billing error ${result.responseCode}" }
         }
-        mutableState.update { it.copy(loading = false, message = message) }
+        mutableState.update {
+            it.copy(
+                loading = false,
+                catalogStatus = if (result.responseCode == BillingClient.BillingResponseCode.BILLING_UNAVAILABLE) {
+                    PlayCatalogStatus.UNAVAILABLE
+                } else {
+                    PlayCatalogStatus.ERROR
+                },
+                message = message,
+            )
+        }
     }
 
     companion object {
