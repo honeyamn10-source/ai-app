@@ -38,7 +38,14 @@ class ApiClient(context: Context) {
     suspend fun addProvider(type: String, apiKey: String, model: String, baseUrl: String = ""): Provider = withContext(Dispatchers.IO) {
         require(apiKey.isNotBlank()) { "API key is required" }
         if (type == "custom" && !baseUrl.startsWith("https://")) throw ApiException("Custom provider must use HTTPS", 400)
-        store.addProvider(type, apiKey.trim(), model.trim(), baseUrl.trim())
+        val saved = store.addProvider(type, apiKey.trim(), model.trim(), baseUrl.trim())
+        try {
+            validateProvider(saved.id)
+            saved
+        } catch (error: Exception) {
+            store.deleteProvider(saved.id)
+            throw error
+        }
     }
 
     suspend fun validateProvider(id: String) = withContext(Dispatchers.IO) {
@@ -67,6 +74,41 @@ class ApiClient(context: Context) {
             emit(chunk)
             delay(8)
         }
+    }
+
+    fun runAgent(template: String, goal: String, providerId: String, model: String): Flow<AgentEvent> = flow {
+        emit(AgentEvent("Plan", "Breaking the goal into clear steps"))
+        val provider = store.storedProvider(providerId)
+        val conversation = store.createConversation(providerId, model.ifBlank { provider.defaultModel })
+        store.addMessage(conversation.id, "user", goal)
+
+        val sources = mutableListOf<ResearchResult>()
+        if (template == "Deep Research" || template == "Business Planner") {
+            emit(AgentEvent("Research", "Searching trusted public sources"))
+            sources += withContext(Dispatchers.IO) { webResearch(goal) }
+            emit(AgentEvent("Research", "Scanning relevant open-source projects"))
+            sources += withContext(Dispatchers.IO) { githubResearch(goal) }
+        }
+
+        emit(AgentEvent("Reason", "Comparing findings and checking the plan"))
+        val sourceText = sources.take(12).joinToString("\n") { "- ${it.title}: ${it.summary} (${it.url})" }
+        val role = when (template) {
+            "Deep Research" -> "You are an autonomous research analyst. Produce a sourced, balanced report with findings, risks, and next actions."
+            "Builder" -> "You are an autonomous product builder. Turn the goal into architecture, an implementation plan, acceptance tests, and a launch checklist."
+            "Study Coach" -> "You are a patient autonomous study coach. Explain simply, create a learning path, examples, practice questions, and checkpoints."
+            "Business Planner" -> "You are an autonomous business strategist. Validate the opportunity, customer, competition, pricing, operations, risks, and a 30-day plan."
+            else -> "You are a reliable autonomous assistant. Plan, reason, execute the request, verify the result, and state next actions."
+        }
+        val prompt = buildString {
+            append(goal)
+            if (sourceText.isNotBlank()) append("\n\nResearch collected by BYAK:\n").append(sourceText)
+            append("\n\nReturn a polished result with: Goal, Plan, Work completed, Result, Risks, and Next actions.")
+        }
+        val answer = withContext(Dispatchers.IO) {
+            complete(provider, model.ifBlank { provider.defaultModel }, listOf(ChatMessage("agent", "user", prompt)), store.fileContext())
+        }
+        store.addMessage(conversation.id, "assistant", answer)
+        emit(AgentEvent("Complete", answer, true))
     }
 
     suspend fun projects(): List<Project> = withContext(Dispatchers.IO) { store.projects() }

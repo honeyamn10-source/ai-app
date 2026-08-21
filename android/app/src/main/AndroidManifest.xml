@@ -6,6 +6,8 @@
         android:name=".ByakApplication"
         android:allowBackup="false"
         android:fullBackupContent="false"
+        android:icon="@drawable/ic_byak_logo"
+        android:roundIcon="@drawable/ic_byak_logo"
         android:usesCleartextTraffic="false"
         android:theme="@style/Theme.BYAKAI"
         android:label="BYAK AI"

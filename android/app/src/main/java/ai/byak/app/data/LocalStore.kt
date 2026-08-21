@@ -63,8 +63,7 @@ internal class LocalStore(context: Context) {
             .put("defaultModel", model)
             .put("maskedKey", masked)
             .put("secret", encrypt(apiKey, id))
-        val values = array(PROVIDERS).put(item)
-        save(PROVIDERS, values)
+        save(PROVIDERS, JSONArray().put(item))
         Provider(id, type, name, masked, model)
     }
 
