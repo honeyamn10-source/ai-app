@@ -30,15 +30,10 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
-import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.JsonPrimitive
-import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
-import kotlinx.serialization.json.intOrNull
-import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
@@ -51,7 +46,7 @@ class KtorStreamingRepository @Inject constructor(
 ) : StreamingRepository {
     override fun stream(request: StreamingRequest): Flow<StreamChunk> = flow {
         val apiKey = secureStore.apiKey(request.provider.name)
-        require(apiKey.isNotBlank()) { "Add your ${request.provider.displayName()} API key first" }
+        require(apiKey.isNotBlank()) { "Add your ${request.provider.displayName()} API key in You → AI connection." }
 
         var retry = 0
         var emittedAny = false
@@ -68,9 +63,12 @@ class KtorStreamingRepository @Inject constructor(
                     if (!response.status.isSuccess()) {
                         val detail = response.bodyAsText().take(2_000)
                         if (response.status.value == 429 || response.status.value >= 500) {
-                            throw RetryableStreamException(response.status.value, detail)
+                            throw RetryableStreamException(
+                                response.status.value,
+                                providerError(request.provider, response.status.value, detail),
+                            )
                         }
-                        error("${request.provider.displayName()} returned ${response.status.value}: ${detail.ifBlank { "Request failed" }}")
+                        error(providerError(request.provider, response.status.value, detail))
                     }
 
                     val channel = response.bodyAsChannel()
@@ -102,25 +100,20 @@ class KtorStreamingRepository @Inject constructor(
     }
 
     private fun endpoint(request: StreamingRequest, apiKey: String): Endpoint = when (request.provider) {
-        AiProvider.OPENAI -> Endpoint(
+        AiProvider.OPENAI -> openAiCompatibleEndpoint(
             url = "https://api.openai.com/v1/chat/completions",
-            headers = mapOf(HttpHeaders.Authorization to "Bearer $apiKey"),
-            body = buildJsonObject {
-                put("model", request.model)
-                put("stream", true)
-                put("stream_options", buildJsonObject { put("include_usage", true) })
-                put("messages", buildJsonArray {
-                    request.systemPrompt?.takeIf(String::isNotBlank)?.let { prompt ->
-                        add(buildJsonObject { put("role", "system"); put("content", prompt) })
-                    }
-                    request.messages.forEach { message ->
-                        add(buildJsonObject {
-                            put("role", message.role.wireName())
-                            put("content", message.content)
-                        })
-                    }
-                })
-            },
+            apiKey = apiKey,
+            request = request,
+            headers = emptyMap(),
+        )
+        AiProvider.OPENROUTER -> openAiCompatibleEndpoint(
+            url = "https://openrouter.ai/api/v1/chat/completions",
+            apiKey = apiKey,
+            request = request,
+            headers = mapOf(
+                "HTTP-Referer" to "https://byak.ai",
+                "X-OpenRouter-Title" to "BYAK AI",
+            ),
         )
         AiProvider.ANTHROPIC -> Endpoint(
             url = "https://api.anthropic.com/v1/messages",
@@ -162,14 +155,54 @@ class KtorStreamingRepository @Inject constructor(
         )
     }
 
+    private fun openAiCompatibleEndpoint(
+        url: String,
+        apiKey: String,
+        request: StreamingRequest,
+        headers: Map<String, String>,
+    ) = Endpoint(
+        url = url,
+        headers = mapOf(HttpHeaders.Authorization to "Bearer $apiKey") + headers,
+        body = buildJsonObject {
+            put("model", request.model)
+            put("stream", true)
+            put("stream_options", buildJsonObject { put("include_usage", true) })
+            put("max_tokens", request.maxTokens)
+            put("messages", buildJsonArray {
+                request.systemPrompt?.takeIf(String::isNotBlank)?.let { prompt ->
+                    add(buildJsonObject { put("role", "system"); put("content", prompt) })
+                }
+                request.messages.forEach { message ->
+                    add(buildJsonObject {
+                        put("role", message.role.wireName())
+                        put("content", message.content)
+                    })
+                }
+            })
+        },
+    )
+
     private fun parseDelta(provider: AiProvider, data: String): String? {
         val root = runCatching { json.parseToJsonElement(data).jsonObject }.getOrNull() ?: return null
         return when (provider) {
-            AiProvider.OPENAI -> root.array("choices")?.firstObject()
+            AiProvider.OPENAI, AiProvider.OPENROUTER -> root.array("choices")?.firstObject()
                 ?.objectValue("delta")?.string("content")
             AiProvider.ANTHROPIC -> root.objectValue("delta")?.string("text")
             AiProvider.GEMINI -> root.array("candidates")?.firstObject()
                 ?.objectValue("content")?.array("parts")?.firstObject()?.string("text")
+        }
+    }
+
+    private fun providerError(provider: AiProvider, status: Int, detail: String): String {
+        val name = provider.displayName()
+        return when (status) {
+            400 -> "$name rejected this request. Check the selected model name."
+            401, 403 -> "$name did not accept this API key. Open You → AI connection and save a valid key."
+            402 -> "$name reports insufficient credits. Add credits or select a free/available model."
+            404 -> "$name could not find the selected model. Choose a model enabled for your account."
+            429 -> "$name is rate-limiting requests. BYAK retried safely; wait a moment and try again."
+            in 500..599 -> "$name is temporarily unavailable after ${MAX_RETRIES + 1} attempts."
+            else -> "$name returned HTTP $status: ${detail.extractProviderMessage().ifBlank { "Request failed" }}"
         }
     }
 
@@ -179,12 +212,18 @@ class KtorStreamingRepository @Inject constructor(
         MessageRole.SYSTEM -> "system"
     }
 
-    private fun AiProvider.displayName(): String = name.lowercase().replaceFirstChar(Char::uppercase)
+    private fun AiProvider.displayName(): String = when (this) {
+        AiProvider.OPENAI -> "OpenAI"
+        AiProvider.OPENROUTER -> "OpenRouter"
+        AiProvider.ANTHROPIC -> "Anthropic"
+        AiProvider.GEMINI -> "Gemini"
+    }
+
     private fun urlEncode(value: String): String = URLEncoder.encode(value, StandardCharsets.UTF_8.toString())
 
     private data class Endpoint(val url: String, val headers: Map<String, String>, val body: JsonObject)
     private class RetryableStreamException(code: Int, detail: String) :
-        IllegalStateException("Temporary provider error $code: ${detail.take(400)}")
+        IllegalStateException(detail.ifBlank { "Temporary provider error $code" })
 
     private companion object {
         const val MAX_RETRIES = 3
@@ -192,6 +231,9 @@ class KtorStreamingRepository @Inject constructor(
         const val MAX_BACKOFF_MS = 8_000L
     }
 }
+
+private fun String.extractProviderMessage(): String =
+    lineSequence().firstOrNull { it.isNotBlank() }?.take(400).orEmpty()
 
 private fun JsonObject.string(key: String): String? = this[key]?.jsonPrimitive?.contentOrNull
 private fun JsonObject.objectValue(key: String): JsonObject? = this[key] as? JsonObject
