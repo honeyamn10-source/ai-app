@@ -1,0 +1,43 @@
+name: Publish BYAK v2 private prerelease
+
+on:
+  push:
+    branches:
+      - automation/publish-byak-v2
+    paths:
+      - .github/workflows/publish-v2.yml
+
+permissions:
+  actions: read
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download verified Android artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p dist
+          gh run download 32460884715 --repo honeyamn10-source/ai-app --name BYAK-AI-Android-builds --dir dist
+
+      - name: Prepare stable file names
+        run: |
+          apk_path="$(find dist -type f -name '*.apk' -print -quit)"
+          aab_path="$(find dist -type f -name '*.aab' -print -quit)"
+          test -n "$apk_path"
+          test -n "$aab_path"
+          cp "$apk_path" BYAK-AI-v2.0.0-debug.apk
+          cp "$aab_path" BYAK-AI-v2.0.0-release.aab
+          sha256sum BYAK-AI-v2.0.0-debug.apk BYAK-AI-v2.0.0-release.aab > BYAK-AI-v2.0.0-SHA256.txt
+
+      - name: Create or update private prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view v2.0.0-beta --repo honeyamn10-source/ai-app >/dev/null 2>&1; then
+            gh release upload v2.0.0-beta --repo honeyamn10-source/ai-app --clobber BYAK-AI-v2.0.0-debug.apk BYAK-AI-v2.0.0-release.aab BYAK-AI-v2.0.0-SHA256.txt
+          else
+            gh release create v2.0.0-beta --repo honeyamn10-source/ai-app --target c22b2951857e99117768be7be0c575fa53ebd083 --prerelease --title "BYAK AI v2.0.0 Beta" --notes "Verified production-architecture beta. CI run 32460884715 passed Android tests, release lint, APK/AAB packaging, backend tests, and security checks." BYAK-AI-v2.0.0-debug.apk BYAK-AI-v2.0.0-release.aab BYAK-AI-v2.0.0-SHA256.txt
+          fi
