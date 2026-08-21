@@ -66,15 +66,19 @@ class SecureStore @Inject constructor(
 
     suspend fun saveProviderKey(provider: String, key: String, model: String) = update {
         when (provider.uppercase()) {
-            "ANTHROPIC" -> it.copy(anthropicKey = key.trim(), selectedProvider = "ANTHROPIC", selectedModel = model)
-            "GEMINI" -> it.copy(geminiKey = key.trim(), selectedProvider = "GEMINI", selectedModel = model)
-            else -> it.copy(openAiKey = key.trim(), selectedProvider = "OPENAI", selectedModel = model)
+            "OPENAI" -> it.copy(openAiKey = key.trim(), selectedProvider = "OPENAI", selectedModel = model.trim())
+            "OPENROUTER" -> it.copy(openRouterKey = key.trim(), selectedProvider = "OPENROUTER", selectedModel = model.trim())
+            "ANTHROPIC" -> it.copy(anthropicKey = key.trim(), selectedProvider = "ANTHROPIC", selectedModel = model.trim())
+            "GEMINI" -> it.copy(geminiKey = key.trim(), selectedProvider = "GEMINI", selectedModel = model.trim())
+            else -> error("Unsupported AI provider: $provider")
         }
     }
 
     fun apiKey(provider: String): String = when (provider.uppercase()) {
+        "OPENAI" -> snapshot().openAiKey
+        "OPENROUTER" -> snapshot().openRouterKey
         "ANTHROPIC" -> snapshot().anthropicKey
         "GEMINI" -> snapshot().geminiKey
-        else -> snapshot().openAiKey
+        else -> ""
     }
 }
