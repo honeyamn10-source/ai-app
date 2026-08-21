@@ -9,6 +9,7 @@ import ai.byak.app.domain.repository.ChatRepository
 import ai.byak.app.data.security.SecureStore
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -76,6 +77,8 @@ class ChatViewModel @Inject constructor(
             try {
                 val id = activeId.value ?: repository.createConversation(prompt.trim().take(70)).also { activeId.value = it }
                 repository.send(id, prompt).collect { }
+            } catch (_: CancellationException) {
+                // Stopping is a successful user action, not an error.
             } catch (error: Throwable) {
                 mutableEffects.emit(ChatEffect.Error(error.message ?: "BYAK could not complete that response"))
             } finally {
