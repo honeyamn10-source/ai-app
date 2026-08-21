@@ -34,7 +34,23 @@ paths:
     post: { responses: { '200': { description: Source-attributed results } } }
   /v1/subscription:
     get: { responses: { '200': { description: Verified entitlement } } }
+  /api/v1/billing/verify:
+    post:
+      summary: Verify a Google Play subscription purchase on the server
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [productId, purchaseToken]
+              properties:
+                productId: { type: string, enum: [byak_monthly_1, byak_annual_10] }
+                purchaseToken: { type: string }
+      responses:
+        '200': { description: Authoritative Google Play entitlement result }
+        '409': { description: Purchase is linked to another account }
+        '503': { description: Google Play verification is not configured }
   /v1/me:
     get: { responses: { '200': { description: Current user } } }
     delete: { responses: { '200': { description: Account deleted } } }
-

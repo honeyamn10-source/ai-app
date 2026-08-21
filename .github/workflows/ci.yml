@@ -22,8 +22,8 @@ jobs:
       - uses: actions/setup-java@v5
         with: { distribution: temurin, java-version: 17 }
       - uses: gradle/actions/setup-gradle@v4
-        with: { gradle-version: '8.10.2' }
-      - run: gradle -p android assembleDebug bundleRelease --no-daemon --stacktrace
+        with: { gradle-version: '9.4.1' }
+      - run: gradle -p android testDebugUnitTest assembleDebug bundleRelease --no-daemon --stacktrace
       - name: Upload APK and AAB
         uses: actions/upload-artifact@v4
         with:

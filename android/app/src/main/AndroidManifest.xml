@@ -2,12 +2,15 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
     <application
         android:name=".ByakApplication"
         android:allowBackup="false"
         android:fullBackupContent="false"
-        android:icon="@drawable/ic_byak_logo"
-        android:roundIcon="@drawable/ic_byak_logo"
+        android:icon="@drawable/ic_launcher_foreground"
+        android:roundIcon="@drawable/ic_launcher_foreground"
         android:usesCleartextTraffic="false"
         android:theme="@style/Theme.BYAKAI"
         android:label="BYAK AI"
