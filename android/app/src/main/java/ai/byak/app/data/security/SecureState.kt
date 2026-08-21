@@ -12,6 +12,7 @@ data class SecureState(
     val userEmail: String = "",
     val localSession: Boolean = false,
     val openAiKey: String = "",
+    val openRouterKey: String = "",
     val anthropicKey: String = "",
     val geminiKey: String = "",
     val selectedProvider: String = "OPENAI",
