@@ -34,7 +34,16 @@ data class AgentStep(
     val sequence: Int,
 )
 
-enum class AgentType { DEEP_RESEARCH, BUILDER, BUSINESS_PLANNER }
+enum class AgentType {
+    DEEP_RESEARCH,
+    BUILDER,
+    BUSINESS_PLANNER,
+    CONTENT_STUDIO,
+    STUDY_COACH,
+    CAREER_COACH,
+    DATA_ANALYST,
+}
+
 enum class AgentStage { PLAN, RESEARCH, SYNTHESIZE, RESULT }
 enum class AgentStatus { QUEUED, RUNNING, SUCCEEDED, FAILED, CANCELLED }
 enum class StepStatus { PENDING, RUNNING, COMPLETE, FAILED }
