@@ -157,18 +157,25 @@ class BillingManager @Inject constructor(
         client.queryPurchasesAsync(
             QueryPurchasesParams.newBuilder().setProductType(BillingClient.ProductType.SUBS).build(),
         ) { result, purchases ->
-            if (result.responseCode == BillingClient.BillingResponseCode.OK) processPurchases(purchases)
-            else handleBillingError(result)
+            if (result.responseCode == BillingClient.BillingResponseCode.OK) {
+                if (purchases.isEmpty()) {
+                    mutableState.update {
+                        it.copy(
+                            loading = false,
+                            verifying = false,
+                            message = "No active BYAK Pro purchase was found for this Google Play account.",
+                        )
+                    }
+                } else {
+                    processPurchases(purchases)
+                }
+            } else {
+                handleBillingError(result)
+            }
         }
     }
 
     fun purchase(activity: Activity, productId: String) {
-        if (secureStore.snapshot().localSession) {
-            mutableState.update {
-                it.copy(message = "A cloud account is required so BYAK can verify and restore your subscription securely. Sign out, then choose cloud login.")
-            }
-            return
-        }
         val product = details[productId]
         if (product == null) {
             mutableState.update {
@@ -213,7 +220,21 @@ class BillingManager @Inject constructor(
 
     private fun processPurchases(purchases: List<Purchase>) {
         val purchased = purchases.filter { it.purchaseState == Purchase.PurchaseState.PURCHASED }
-        if (purchased.isEmpty()) return
+        if (purchased.isEmpty()) {
+            val pending = purchases.any { it.purchaseState == Purchase.PurchaseState.PENDING }
+            mutableState.update {
+                it.copy(
+                    loading = false,
+                    verifying = false,
+                    message = if (pending) {
+                        "Your Google Play purchase is pending. Pro will activate after payment completes."
+                    } else {
+                        "No active BYAK Pro purchase was found for this Google Play account."
+                    },
+                )
+            }
+            return
+        }
         mutableState.update { it.copy(verifying = true, message = "Confirming the purchase securely…") }
         purchased.forEach { purchase ->
             val productId = purchase.products.firstOrNull { it in PRODUCT_IDS } ?: return@forEach
