@@ -157,13 +157,9 @@ fun SettingsScreen(viewModel: SettingsViewModel, openLibrary: () -> Unit) {
 
 @Composable
 private fun ProCard(state: SettingsUiState, activity: Activity?, viewModel: SettingsViewModel) {
-    val fallbackPlans = listOf(
-        PlanOffer(BillingManager.MONTHLY, "Monthly", "$1.00", "per month"),
-        PlanOffer(BillingManager.ANNUAL, "Annual", "$10.00", "per year"),
-    )
-    val plans = fallbackPlans.map { fallback ->
-        state.billing.offers.firstOrNull { it.productId == fallback.productId } ?: fallback
-    }
+    // Prices and availability must come from Google Play. Never show invented fallback
+    // prices: they confuse sideload testers and can violate store price transparency.
+    val plans = state.billing.offers
     GlassCard(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -206,13 +202,6 @@ private fun ProCard(state: SettingsUiState, activity: Activity?, viewModel: Sett
             if (state.billing.catalogStatus == PlayCatalogStatus.NOT_PUBLISHED) {
                 Text(
                     "Checkout is intentionally disabled in sideloaded APKs. The signed AAB must be installed from a Play testing track with both subscription base plans active.",
-                    color = PremiumGold,
-                    fontSize = 12.sp,
-                )
-            }
-            if (state.session?.localOnly == true && state.billing.offers.isNotEmpty()) {
-                Text(
-                    "Cloud sign-in is required before purchase so Pro can be server-verified and restored on another device.",
                     color = PremiumGold,
                     fontSize = 12.sp,
                 )
@@ -266,7 +255,7 @@ private fun ProviderDialog(
         title = { Text("Connect your AI") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Text("Choose a provider, then BYAK will verify the key before using it.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text("Choose a provider and model. BYAK tests the same generation route used by Chat before saving.", color = MaterialTheme.colorScheme.onSurfaceVariant)
                 LazyRow(horizontalArrangement = Arrangement.spacedBy(7.dp)) {
                     items(AiProvider.entries, key = { it.name }) { item ->
                         AssistChip(
@@ -337,7 +326,7 @@ private fun ProviderDialog(
                 enabled = !state.testingConnection && model.isNotBlank() && (hasExisting || key.isNotBlank()),
             ) {
                 if (state.testingConnection) CircularProgressIndicator(Modifier.size(17.dp), strokeWidth = 2.dp)
-                else Text(if (state.connectionSucceeded == true) "Test again" else "Save & test")
+                else Text(if (hasExisting) "Update & test" else "Connect & test")
             }
         },
         dismissButton = { TextButton(dismiss, enabled = !state.testingConnection) { Text("Done") } },
