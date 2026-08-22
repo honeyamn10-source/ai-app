@@ -53,7 +53,6 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import ai.byak.app.billing.BillingManager
 import ai.byak.app.billing.PlanOffer
 import ai.byak.app.billing.PlayCatalogStatus
 import ai.byak.app.domain.model.AiProvider
