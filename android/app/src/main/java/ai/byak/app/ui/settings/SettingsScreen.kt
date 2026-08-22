@@ -246,8 +246,9 @@ private fun ProviderDialog(
 ) {
     var provider by remember { mutableStateOf(state.provider) }
     var key by remember { mutableStateOf("") }
-    var model by remember(provider) { mutableStateOf(provider.defaultModel()) }
-    val hasExisting = state.hasKeyFor(provider)
+    var model by remember(provider) { mutableStateOf(state.modelFor(provider)) }
+    val needsKey = provider != AiProvider.ON_DEVICE
+    val hasExisting = needsKey && state.hasKeyFor(provider)
     AlertDialog(
         onDismissRequest = { if (!state.testingConnection) dismiss() },
         icon = { Icon(Icons.Outlined.Key, null) },
@@ -266,29 +267,40 @@ private fun ProviderDialog(
                         )
                     }
                 }
+                AnimatedVisibility(provider == AiProvider.ON_DEVICE) {
+                    Text(
+                        "Runs privately with Gemini Nano through Android AICore. Availability depends on this phone; no API key is needed.",
+                        color = CyberTeal,
+                        fontSize = 12.sp,
+                    )
+                }
                 AnimatedVisibility(hasExisting) {
                     Text("A key is already stored. Leave this blank to test and keep it.", color = CyberTeal, fontSize = 12.sp)
                 }
-                OutlinedTextField(
-                    value = key,
-                    onValueChange = { key = it },
-                    modifier = Modifier.fillMaxWidth(),
-                    label = { Text(if (hasExisting) "Replace API key (optional)" else "API key") },
-                    visualTransformation = PasswordVisualTransformation(),
-                    singleLine = true,
-                    enabled = !state.testingConnection,
-                    shape = RoundedCornerShape(16.dp),
-                )
-                OutlinedTextField(
-                    value = model,
-                    onValueChange = { model = it },
-                    modifier = Modifier.fillMaxWidth(),
-                    label = { Text("Model") },
-                    supportingText = { Text(provider.modelHint()) },
-                    singleLine = true,
-                    enabled = !state.testingConnection,
-                    shape = RoundedCornerShape(16.dp),
-                )
+                AnimatedVisibility(needsKey) {
+                    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        OutlinedTextField(
+                            value = key,
+                            onValueChange = { key = it },
+                            modifier = Modifier.fillMaxWidth(),
+                            label = { Text(if (hasExisting) "Replace API key (optional)" else "API key") },
+                            visualTransformation = PasswordVisualTransformation(),
+                            singleLine = true,
+                            enabled = !state.testingConnection,
+                            shape = RoundedCornerShape(16.dp),
+                        )
+                        OutlinedTextField(
+                            value = model,
+                            onValueChange = { model = it },
+                            modifier = Modifier.fillMaxWidth(),
+                            label = { Text("Model") },
+                            supportingText = { Text(provider.modelHint()) },
+                            singleLine = true,
+                            enabled = !state.testingConnection,
+                            shape = RoundedCornerShape(16.dp),
+                        )
+                    }
+                }
                 state.connectionMessage?.let { message ->
                     Row(verticalAlignment = Alignment.Top) {
                         if (state.testingConnection) {
@@ -313,7 +325,11 @@ private fun ProviderDialog(
                     }
                 }
                 Text(
-                    "The key is sent only to ${provider.displayName()}'s official API and remains encrypted on this device.",
+                    if (needsKey) {
+                        "The key is sent only to ${provider.displayName()}'s official API and remains encrypted on this device."
+                    } else {
+                        "BYAK checks Android's on-device model and downloads it only through the system service when required."
+                    },
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     fontSize = 12.sp,
                 )
@@ -322,10 +338,18 @@ private fun ProviderDialog(
         confirmButton = {
             Button(
                 onClick = { save(provider, key, model) },
-                enabled = !state.testingConnection && model.isNotBlank() && (hasExisting || key.isNotBlank()),
+                enabled = !state.testingConnection && (
+                    provider == AiProvider.ON_DEVICE || (model.isNotBlank() && (hasExisting || key.isNotBlank()))
+                ),
             ) {
                 if (state.testingConnection) CircularProgressIndicator(Modifier.size(17.dp), strokeWidth = 2.dp)
-                else Text(if (hasExisting) "Update & test" else "Connect & test")
+                else Text(
+                    when {
+                        provider == AiProvider.ON_DEVICE -> "Check offline AI"
+                        hasExisting -> "Update & test"
+                        else -> "Connect & test"
+                    },
+                )
             }
         },
         dismissButton = { TextButton(dismiss, enabled = !state.testingConnection) { Text("Done") } },
@@ -337,6 +361,7 @@ private fun SettingsUiState.hasKeyFor(provider: AiProvider): Boolean = when (pro
     AiProvider.OPENROUTER -> hasOpenRouter
     AiProvider.ANTHROPIC -> hasAnthropic
     AiProvider.GEMINI -> hasGemini
+    AiProvider.ON_DEVICE -> true
 }
 
 private fun AiProvider.displayName(): String = when (this) {
@@ -344,18 +369,29 @@ private fun AiProvider.displayName(): String = when (this) {
     AiProvider.OPENROUTER -> "OpenRouter"
     AiProvider.ANTHROPIC -> "Claude"
     AiProvider.GEMINI -> "Gemini"
+    AiProvider.ON_DEVICE -> "On device"
 }
 
 private fun AiProvider.defaultModel(): String = when (this) {
     AiProvider.OPENAI -> "gpt-5-mini"
     AiProvider.OPENROUTER -> "openrouter/auto"
     AiProvider.ANTHROPIC -> "claude-sonnet-4-5"
-    AiProvider.GEMINI -> "gemini-2.5-flash"
+    AiProvider.GEMINI -> "gemini-3.1-flash-lite"
+    AiProvider.ON_DEVICE -> "Gemini Nano"
 }
 
 private fun AiProvider.modelHint(): String = when (this) {
     AiProvider.OPENROUTER -> "Use openrouter/auto or a provider/model ID from OpenRouter."
     AiProvider.OPENAI -> "Example: gpt-5-mini"
     AiProvider.ANTHROPIC -> "Example: claude-sonnet-4-5"
-    AiProvider.GEMINI -> "Example: gemini-2.5-flash"
+    AiProvider.GEMINI -> "Example: gemini-3.1-flash-lite"
+    AiProvider.ON_DEVICE -> "No cloud model or API key required."
+}
+
+private fun SettingsUiState.modelFor(provider: AiProvider): String = when (provider) {
+    AiProvider.OPENAI -> openAiModel
+    AiProvider.OPENROUTER -> openRouterModel
+    AiProvider.ANTHROPIC -> anthropicModel
+    AiProvider.GEMINI -> geminiModel
+    AiProvider.ON_DEVICE -> "Gemini Nano"
 }

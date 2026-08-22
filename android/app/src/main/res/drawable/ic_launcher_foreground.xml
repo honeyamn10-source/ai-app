@@ -4,54 +4,33 @@
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
-    <!-- Obsidian foundation with a restrained premium border. -->
-    <path
-        android:fillColor="#0B0C10"
-        android:pathData="M24,7H84A17,17 0,0 1,101 24V84A17,17 0,0 1,84 101H24A17,17 0,0 1,7 84V24A17,17 0,0 1,24 7Z" />
+    <!-- Restrained B∞ monogram. All geometry remains inside the adaptive-icon safe zone. -->
     <path
         android:fillColor="@android:color/transparent"
-        android:strokeColor="#25303A"
-        android:strokeWidth="1.5"
-        android:pathData="M25,11H83A14,14 0,0 1,97 25V83A14,14 0,0 1,83 97H25A14,14 0,0 1,11 83V25A14,14 0,0 1,25 11Z" />
-
-    <!-- Precise continuous intelligence loop: the core BYAK brand mark. -->
+        android:pathData="M34,29L34,79"
+        android:strokeColor="#F4F0FA"
+        android:strokeLineCap="round"
+        android:strokeWidth="5.5" />
     <path
         android:fillColor="@android:color/transparent"
-        android:strokeColor="#8A2BE2"
+        android:pathData="M35,32H54C67,32 72,39 72,46C72,53 65,57 54,57H35"
+        android:strokeColor="#A66BFF"
         android:strokeLineCap="round"
         android:strokeLineJoin="round"
-        android:strokeWidth="10"
-        android:pathData="M20,55C26,38 39,36 54,53C69,70 82,68 88,51" />
+        android:strokeWidth="6" />
     <path
         android:fillColor="@android:color/transparent"
-        android:strokeColor="#00D9F5"
+        android:pathData="M35,55H56C71,55 77,62 77,69C77,76 70,79 56,79H35"
+        android:strokeColor="#29D8E6"
         android:strokeLineCap="round"
         android:strokeLineJoin="round"
-        android:strokeWidth="10"
-        android:pathData="M20,55C27,72 40,70 54,53C68,36 81,34 88,51" />
+        android:strokeWidth="6" />
     <path
         android:fillColor="@android:color/transparent"
-        android:strokeColor="#DCC7FF"
+        android:pathData="M46,55C53,46 60,45 67,54C74,63 81,62 85,54C81,46 74,45 67,54C60,63 53,64 46,55Z"
+        android:strokeColor="#DCC6FF"
         android:strokeLineCap="round"
-        android:strokeWidth="2.2"
-        android:pathData="M21,52C28,39 39,39 52,53" />
-    <path
-        android:fillColor="@android:color/transparent"
-        android:strokeColor="#BDF8FF"
-        android:strokeLineCap="round"
-        android:strokeWidth="2.2"
-        android:pathData="M56,53C69,38 80,37 87,49" />
-
-    <!-- Gold intelligence node; compact enough to remain crisp at launcher size. -->
-    <path android:fillColor="#0B0C10" android:pathData="M54,43L64,53L54,63L44,53Z" />
-    <path android:fillColor="#FFD166" android:pathData="M54,46L61,53L54,60L47,53Z" />
-    <path android:fillColor="#FFFFFF" android:pathData="M54,50L57,53L54,56L51,53Z" />
-
-    <!-- Subtle orbital signature. -->
-    <path
-        android:fillColor="@android:color/transparent"
-        android:strokeColor="#4B5D6B"
-        android:strokeWidth="1.2"
-        android:pathData="M29,27C43,16 65,16 79,27" />
-    <path android:fillColor="#00E5FF" android:pathData="M80,24L82,27L80,30L78,27Z" />
+        android:strokeLineJoin="round"
+        android:strokeWidth="2.4" />
+    <path android:fillColor="#F4C95D" android:pathData="M66,51L70,55L66,59L62,55Z" />
 </vector>

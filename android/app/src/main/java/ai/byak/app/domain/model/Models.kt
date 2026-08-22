@@ -48,7 +48,31 @@ enum class AgentStage { PLAN, RESEARCH, SYNTHESIZE, RESULT }
 enum class AgentStatus { QUEUED, RUNNING, SUCCEEDED, FAILED, CANCELLED }
 enum class StepStatus { PENDING, RUNNING, COMPLETE, FAILED }
 enum class MessageRole { USER, ASSISTANT, SYSTEM }
-enum class AiProvider { OPENAI, OPENROUTER, ANTHROPIC, GEMINI }
+enum class AiProvider { OPENAI, OPENROUTER, ANTHROPIC, GEMINI, ON_DEVICE }
+
+enum class ImageProvider { OPENROUTER, GEMINI }
+enum class ImageResolution { ONE_K, TWO_K, FOUR_K }
+enum class ImageQuality { AUTO, MEDIUM, HIGH }
+
+@Immutable
+data class ImageGenerationRequest(
+    val provider: ImageProvider,
+    val model: String,
+    val prompt: String,
+    val aspectRatio: String = "1:1",
+    val resolution: ImageResolution = ImageResolution.ONE_K,
+    val quality: ImageQuality = ImageQuality.AUTO,
+)
+
+@Immutable
+data class GeneratedImage(
+    val id: String,
+    val filePath: String,
+    val mimeType: String,
+    val prompt: String,
+    val provider: ImageProvider,
+    val model: String,
+)
 
 @Immutable
 data class Conversation(

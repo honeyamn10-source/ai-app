@@ -26,6 +26,10 @@ data class SettingsUiState(
     val session: Session? = null,
     val provider: AiProvider = AiProvider.OPENAI,
     val model: String = "gpt-5-mini",
+    val openAiModel: String = "gpt-5-mini",
+    val openRouterModel: String = "openrouter/auto",
+    val anthropicModel: String = "claude-sonnet-4-5",
+    val geminiModel: String = "gemini-3.1-flash-lite",
     val hasOpenAi: Boolean = false,
     val hasOpenRouter: Boolean = false,
     val hasAnthropic: Boolean = false,
@@ -33,6 +37,7 @@ data class SettingsUiState(
     val testingConnection: Boolean = false,
     val connectionMessage: String? = null,
     val connectionSucceeded: Boolean? = null,
+    val availableModels: List<String> = emptyList(),
     val billing: BillingState = BillingState(),
 )
 
@@ -41,6 +46,7 @@ private data class ConnectionUiState(
     val testing: Boolean = false,
     val message: String? = null,
     val succeeded: Boolean? = null,
+    val availableModels: List<String> = emptyList(),
 )
 
 @HiltViewModel
@@ -62,6 +68,10 @@ class SettingsViewModel @Inject constructor(
             session = session,
             provider = runCatching { AiProvider.valueOf(secure.selectedProvider) }.getOrDefault(AiProvider.OPENAI),
             model = secure.selectedModel,
+            openAiModel = secure.openAiModel,
+            openRouterModel = secure.openRouterModel,
+            anthropicModel = secure.anthropicModel,
+            geminiModel = secure.geminiModel,
             hasOpenAi = secure.openAiKey.isNotBlank(),
             hasOpenRouter = secure.openRouterKey.isNotBlank(),
             hasAnthropic = secure.anthropicKey.isNotBlank(),
@@ -69,6 +79,7 @@ class SettingsViewModel @Inject constructor(
             testingConnection = connectionState.testing,
             connectionMessage = connectionState.message,
             connectionSucceeded = connectionState.succeeded,
+            availableModels = connectionState.availableModels,
             billing = billing,
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), SettingsUiState())
@@ -80,9 +91,13 @@ class SettingsViewModel @Inject constructor(
             val existing = secureStore.apiKey(provider.name)
             val effectiveKey = newKey.trim().ifBlank { existing }
             connectionTester.test(provider, effectiveKey, model.trim())
-                .onSuccess { message ->
-                    secureStore.saveProviderKey(provider.name, effectiveKey, model.trim())
-                    connection.value = ConnectionUiState(message = message, succeeded = true)
+                .onSuccess { report ->
+                    secureStore.saveProviderKey(provider.name, effectiveKey, report.resolvedModel)
+                    connection.value = ConnectionUiState(
+                        message = report.message,
+                        succeeded = true,
+                        availableModels = report.availableModels,
+                    )
                 }
                 .onFailure { error ->
                     connection.value = ConnectionUiState(

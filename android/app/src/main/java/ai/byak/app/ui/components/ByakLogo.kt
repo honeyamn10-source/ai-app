@@ -12,7 +12,7 @@ import ai.byak.app.R
 @Composable
 fun ByakLogo(size: Dp, modifier: Modifier = Modifier) {
     Image(
-        painter = painterResource(R.drawable.ic_launcher_foreground),
+        painter = painterResource(R.drawable.ic_byak_logo),
         contentDescription = "BYAK AI",
         modifier = modifier.size(size),
     )

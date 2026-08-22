@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material.icons.outlined.ChatBubbleOutline
+import androidx.compose.material.icons.outlined.Image
 import androidx.compose.material.icons.outlined.PersonOutline
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
@@ -33,12 +34,15 @@ import ai.byak.app.ui.chat.ChatScreen
 import ai.byak.app.ui.chat.ChatViewModel
 import ai.byak.app.ui.library.LibraryScreen
 import ai.byak.app.ui.library.LibraryViewModel
+import ai.byak.app.ui.image.ImageStudioScreen
+import ai.byak.app.ui.image.ImageStudioViewModel
 import ai.byak.app.ui.settings.SettingsScreen
 import ai.byak.app.ui.settings.SettingsViewModel
 
 private enum class MainDestination(val route: String, val label: String, val icon: ImageVector) {
     Chat("chat", "Chat", Icons.Outlined.ChatBubbleOutline),
     Agents("agents", "Agents", Icons.Outlined.AutoAwesome),
+    Create("create", "Create", Icons.Outlined.Image),
     You("you", "You", Icons.Outlined.PersonOutline),
 }
 
@@ -91,6 +95,12 @@ private fun AuthenticatedApp() {
             composable(MainDestination.Agents.route) {
                 AgentScreen(
                     viewModel = hiltViewModel<AgentViewModel>(),
+                    openSettings = { navigate(MainDestination.You) },
+                )
+            }
+            composable(MainDestination.Create.route) {
+                ImageStudioScreen(
+                    viewModel = hiltViewModel<ImageStudioViewModel>(),
                     openSettings = { navigate(MainDestination.You) },
                 )
             }
