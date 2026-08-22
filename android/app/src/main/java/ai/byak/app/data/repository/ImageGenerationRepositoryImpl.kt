@@ -34,7 +34,6 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonPrimitive
@@ -178,17 +177,17 @@ class ImageGenerationRepositoryImpl @Inject constructor(
             contentType(ContentType.Application.Json)
             setBody(buildJsonObject {
                 put("model", request.model)
-                put("input", buildJsonArray {
-                    add(buildJsonObject {
-                        put("type", "text")
-                        put("text", request.prompt.trim())
-                    })
-                })
+                put("input", request.prompt.trim())
                 put("response_format", buildJsonObject {
                     put("type", "image")
                     put("mime_type", "image/png")
                     put("aspect_ratio", request.aspectRatio)
-                    put("image_size", request.resolution.wireValue())
+                    // Gemini Flash Lite Image currently accepts 1K only. Clamp the
+                    // control instead of sending a request Google will reject.
+                    put(
+                        "image_size",
+                        if (request.model.contains("flash-lite-image")) "1K" else request.resolution.wireValue(),
+                    )
                 })
             })
         }
