@@ -5,6 +5,7 @@ import ai.byak.app.data.local.VectorCodec
 import ai.byak.app.data.repository.providerFailure
 import ai.byak.app.data.security.normalizeCredential
 import ai.byak.app.data.security.SecureState
+import ai.byak.app.data.security.withSupportedProvider
 import ai.byak.app.domain.model.AiProvider
 import ai.byak.app.domain.model.ImageProvider
 import kotlinx.serialization.json.Json
@@ -65,6 +66,15 @@ class ModelsTest {
         assertEquals("gemini-3.1-flash-lite", decoded.geminiModel)
         assertEquals("ON_DEVICE", decoded.selectedProvider)
         assertEquals("Gemini Nano", decoded.selectedModel)
+    }
+
+    @Test fun removedLocalServerSelectionMigratesToPhoneAi() {
+        val migrated = SecureState(
+            selectedProvider = "OLLAMA",
+            selectedModel = "deepseek-coder:6.7b",
+        ).withSupportedProvider()
+        assertEquals("ON_DEVICE", migrated.selectedProvider)
+        assertEquals("Gemini Nano", migrated.selectedModel)
     }
 
     @Test fun playProductIdentifiersRemainStable() {

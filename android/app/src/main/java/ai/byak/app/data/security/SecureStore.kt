@@ -2,6 +2,7 @@ package ai.byak.app.data.security
 
 import androidx.datastore.core.DataStore
 import ai.byak.app.core.di.ApplicationScope
+import ai.byak.app.domain.model.AiProvider
 import java.util.concurrent.atomic.AtomicReference
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -19,10 +20,18 @@ class SecureStore @Inject constructor(
     private val cached = AtomicReference(SecureState())
 
     init {
-        scope.launch { dataStore.data.collect(cached::set) }
+        scope.launch {
+            dataStore.data.collect { stored ->
+                val supported = stored.withSupportedProvider()
+                cached.set(supported)
+                if (supported != stored) {
+                    dataStore.updateData { current -> current.withSupportedProvider() }
+                }
+            }
+        }
     }
 
-    val state: Flow<SecureState> = dataStore.data
+    val state: Flow<SecureState> = dataStore.data.map { it.withSupportedProvider() }
     val hasSession: Flow<Boolean> = state
         .map { it.hasValidSession(System.currentTimeMillis() / 1_000) }
         .distinctUntilChanged()
@@ -132,4 +141,12 @@ class SecureStore @Inject constructor(
         const val ON_DEVICE_MODEL = "Gemini Nano"
         private const val ON_DEVICE_READY_SENTINEL = "device"
     }
+}
+
+internal fun SecureState.withSupportedProvider(): SecureState {
+    val supported = AiProvider.entries.any { it.name == selectedProvider }
+    return if (supported) this else copy(
+        selectedProvider = AiProvider.ON_DEVICE.name,
+        selectedModel = SecureStore.ON_DEVICE_MODEL,
+    )
 }
