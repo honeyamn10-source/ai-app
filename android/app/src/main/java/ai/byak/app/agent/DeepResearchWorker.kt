@@ -161,7 +161,7 @@ class DeepResearchWorker @AssistedInject constructor(
         setForegroundAsync(foregroundInfo(runId, stage.notificationText(), progressStart)).await()
 
         val state = secureStore.snapshot()
-        val provider = runCatching { AiProvider.valueOf(state.selectedProvider) }.getOrDefault(AiProvider.OPENAI)
+        val provider = runCatching { AiProvider.valueOf(state.selectedProvider) }.getOrDefault(AiProvider.ON_DEVICE)
         val content = StringBuilder()
         var lastPersist = 0L
         streaming.stream(

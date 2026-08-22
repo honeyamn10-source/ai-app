@@ -2,6 +2,7 @@ package ai.byak.app.data.security
 
 import androidx.datastore.core.DataStore
 import ai.byak.app.core.di.ApplicationScope
+import ai.byak.app.domain.model.AiProvider
 import java.util.concurrent.atomic.AtomicReference
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -19,10 +20,18 @@ class SecureStore @Inject constructor(
     private val cached = AtomicReference(SecureState())
 
     init {
-        scope.launch { dataStore.data.collect(cached::set) }
+        scope.launch {
+            dataStore.data.collect { stored ->
+                val supported = stored.withSupportedProvider()
+                cached.set(supported)
+                if (supported != stored) {
+                    dataStore.updateData { current -> current.withSupportedProvider() }
+                }
+            }
+        }
     }
 
-    val state: Flow<SecureState> = dataStore.data
+    val state: Flow<SecureState> = dataStore.data.map { it.withSupportedProvider() }
     val hasSession: Flow<Boolean> = state
         .map { it.hasValidSession(System.currentTimeMillis() / 1_000) }
         .distinctUntilChanged()
@@ -69,7 +78,7 @@ class SecureStore @Inject constructor(
         )
     }
 
-    suspend fun saveProviderKey(provider: String, key: String, model: String, endpoint: String = "") = update {
+    suspend fun saveProviderKey(provider: String, key: String, model: String) = update {
         when (provider.uppercase()) {
             "OPENAI" -> it.copy(
                 openAiKey = normalizeCredential(ai.byak.app.domain.model.AiProvider.OPENAI, key).value,
@@ -95,12 +104,6 @@ class SecureStore @Inject constructor(
                 selectedModel = model.trim(),
                 geminiModel = model.trim(),
             )
-            "OLLAMA" -> it.copy(
-                selectedProvider = "OLLAMA",
-                selectedModel = model.trim(),
-                ollamaModel = model.trim(),
-                ollamaEndpoint = endpoint.trim().trimEnd('/'),
-            )
             "ON_DEVICE" -> it.copy(selectedProvider = "ON_DEVICE", selectedModel = ON_DEVICE_MODEL)
             else -> error("Unsupported AI provider: $provider")
         }
@@ -119,7 +122,6 @@ class SecureStore @Inject constructor(
         "OPENROUTER" -> snapshot().openRouterKey
         "ANTHROPIC" -> snapshot().anthropicKey
         "GEMINI" -> snapshot().geminiKey
-        "OLLAMA" -> LOCAL_READY_SENTINEL
         "ON_DEVICE" -> ON_DEVICE_READY_SENTINEL
         else -> ""
     }
@@ -130,7 +132,6 @@ class SecureStore @Inject constructor(
             "OPENROUTER" -> state.openRouterModel
             "ANTHROPIC" -> state.anthropicModel
             "GEMINI" -> state.geminiModel
-            "OLLAMA" -> state.ollamaModel
             "ON_DEVICE" -> ON_DEVICE_MODEL
             else -> state.selectedModel
         }
@@ -138,7 +139,14 @@ class SecureStore @Inject constructor(
 
     companion object {
         const val ON_DEVICE_MODEL = "Gemini Nano"
-        private const val LOCAL_READY_SENTINEL = "local"
         private const val ON_DEVICE_READY_SENTINEL = "device"
     }
+}
+
+internal fun SecureState.withSupportedProvider(): SecureState {
+    val supported = AiProvider.entries.any { it.name == selectedProvider }
+    return if (supported) this else copy(
+        selectedProvider = AiProvider.ON_DEVICE.name,
+        selectedModel = SecureStore.ON_DEVICE_MODEL,
+    )
 }

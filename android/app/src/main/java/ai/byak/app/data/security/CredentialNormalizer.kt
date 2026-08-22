@@ -58,7 +58,7 @@ private fun AiProvider.tokenPattern(): Regex? = when (this) {
     AiProvider.ANTHROPIC -> Regex("""sk-ant-[A-Za-z0-9_-]{16,}""")
     // Google can change key prefixes, so assignment extraction remains the fallback.
     AiProvider.GEMINI -> Regex("""AIza[A-Za-z0-9_-]{20,}""")
-    AiProvider.OLLAMA, AiProvider.ON_DEVICE -> null
+    AiProvider.ON_DEVICE -> null
 }
 
 private val ASSIGNMENT_PATTERN = Regex(

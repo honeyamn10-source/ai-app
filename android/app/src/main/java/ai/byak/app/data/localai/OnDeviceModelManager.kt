@@ -8,6 +8,7 @@ import com.google.mlkit.genai.common.FeatureStatus
 import com.google.mlkit.genai.prompt.Generation
 import javax.inject.Inject
 import javax.inject.Singleton
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.flow
@@ -24,11 +25,16 @@ data class OnDevicePreparation(
 class OnDeviceModelManager @Inject constructor() {
     private val model by lazy(LazyThreadSafetyMode.SYNCHRONIZED) { Generation.getClient() }
 
-    suspend fun status(): OnDeviceAvailability = when (model.checkStatus()) {
-        FeatureStatus.AVAILABLE -> OnDeviceAvailability.AVAILABLE
-        FeatureStatus.DOWNLOADABLE -> OnDeviceAvailability.DOWNLOADABLE
-        FeatureStatus.DOWNLOADING -> OnDeviceAvailability.DOWNLOADING
-        else -> OnDeviceAvailability.UNSUPPORTED
+    suspend fun status(): OnDeviceAvailability = try {
+        when (model.checkStatus()) {
+            FeatureStatus.AVAILABLE -> OnDeviceAvailability.AVAILABLE
+            FeatureStatus.DOWNLOADABLE -> OnDeviceAvailability.DOWNLOADABLE
+            FeatureStatus.DOWNLOADING -> OnDeviceAvailability.DOWNLOADING
+            else -> OnDeviceAvailability.UNSUPPORTED
+        }
+    } catch (error: Throwable) {
+        if (error is CancellationException) throw error
+        throw IllegalStateException(phoneAiFailure(error), error)
     }
 
     suspend fun prepare(): OnDevicePreparation {
@@ -36,14 +42,19 @@ class OnDeviceModelManager @Inject constructor() {
             OnDeviceAvailability.AVAILABLE -> ready()
             OnDeviceAvailability.DOWNLOADABLE -> {
                 var failure: Throwable? = null
-                model.download().collect { download ->
-                    when (download) {
-                        is DownloadStatus.DownloadFailed -> failure = download.e
-                        else -> Unit
+                try {
+                    model.download().collect { download ->
+                        when (download) {
+                            is DownloadStatus.DownloadFailed -> failure = download.e
+                            else -> Unit
+                        }
                     }
+                } catch (error: Throwable) {
+                    if (error is CancellationException) throw error
+                    failure = error
                 }
                 failure?.let {
-                    error("Gemini Nano download failed: ${it.message ?: "check your connection and device storage"}")
+                    error("Phone AI could not be prepared. Keep Google Play services and Android AICore updated, check storage and internet access, then try again. ${it.message.orEmpty()}".trim())
                 }
                 if (status() == OnDeviceAvailability.AVAILABLE) ready()
                 else error("Gemini Nano is still preparing. Keep the phone online and try again shortly.")
@@ -52,14 +63,16 @@ class OnDeviceModelManager @Inject constructor() {
                 "Gemini Nano is downloading through Android. Keep the phone online, then check again when it finishes.",
             )
             OnDeviceAvailability.UNSUPPORTED -> error(
-                "Offline AI is not available on this phone. It requires a supported AICore device with a locked bootloader.",
+                "Phone AI is not supported by this device yet. It requires Android AICore, a supported chipset, current Google Play services, and a locked bootloader. You can still connect a cloud provider from this phone.",
             )
         }
     }
 
     fun stream(request: StreamingRequest): Flow<StreamChunk> = flow {
         if (status() != OnDeviceAvailability.AVAILABLE) {
-            error("Gemini Nano is not ready. Open You → AI connection → On device to check or download it.")
+            // First-use setup stays entirely on the phone. AICore owns the model
+            // download and lifecycle; BYAK never downloads arbitrary executable code.
+            prepare()
         }
         val prompt = buildPrompt(request)
         val full = StringBuilder()
@@ -104,5 +117,13 @@ class OnDeviceModelManager @Inject constructor() {
 
     private companion object {
         const val MAX_PROMPT_CHARS = 12_000
+    }
+
+    private fun phoneAiFailure(error: Throwable): String {
+        val detail = error.message.orEmpty().take(180)
+        return buildString {
+            append("Android could not start Phone AI. Update Google Play services and the Android AICore system component, restart the phone, and try again.")
+            if (detail.isNotBlank()) append(" ").append(detail)
+        }
     }
 }

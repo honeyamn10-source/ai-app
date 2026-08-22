@@ -1,6 +1,4 @@
 <?xml version="1.0" encoding="utf-8"?>
 <network-security-config>
-    <!-- Debug APKs may connect to a private-LAN Ollama server. Application-level
-         validation still rejects public cleartext hosts; release builds remain HTTPS-only. -->
-    <base-config cleartextTrafficPermitted="true" />
+    <base-config cleartextTrafficPermitted="false" />
 </network-security-config>

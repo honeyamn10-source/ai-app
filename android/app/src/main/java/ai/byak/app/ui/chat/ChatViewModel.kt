@@ -5,6 +5,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import ai.byak.app.domain.model.ChatMessage
 import ai.byak.app.domain.model.Conversation
+import ai.byak.app.domain.model.AiProvider
 import ai.byak.app.domain.repository.ChatRepository
 import ai.byak.app.data.security.SecureStore
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -61,7 +62,9 @@ class ChatViewModel @Inject constructor(
             messages = items,
             generating = isGenerating,
             providerReady = secureStore.apiKey(secure.selectedProvider).isNotBlank(),
-            providerName = secure.selectedProvider.lowercase().replaceFirstChar(Char::uppercase),
+            providerName = runCatching { AiProvider.valueOf(secure.selectedProvider) }
+                .getOrDefault(AiProvider.ON_DEVICE)
+                .customerName(),
             model = secure.selectedModel,
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), ChatUiState())
@@ -91,4 +94,12 @@ class ChatViewModel @Inject constructor(
         generationJob?.cancel()
         generating.value = false
     }
+}
+
+private fun AiProvider.customerName(): String = when (this) {
+    AiProvider.ON_DEVICE -> "Phone AI"
+    AiProvider.OPENROUTER -> "OpenRouter"
+    AiProvider.GEMINI -> "Gemini"
+    AiProvider.OPENAI -> "OpenAI"
+    AiProvider.ANTHROPIC -> "Claude"
 }
