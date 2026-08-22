@@ -29,8 +29,13 @@ class SecureStore @Inject constructor(
 
     fun snapshot(): SecureState = cached.get()
 
-    suspend fun update(transform: (SecureState) -> SecureState): SecureState =
-        dataStore.updateData(transform)
+    suspend fun update(transform: (SecureState) -> SecureState): SecureState {
+        // DataStore writes are serialized, but its collector may resume later. Update the
+        // in-process snapshot before returning so Chat can use a newly saved key immediately.
+        val updated = dataStore.updateData(transform)
+        cached.set(updated)
+        return updated
+    }
 
     suspend fun saveSession(
         accessToken: String,
