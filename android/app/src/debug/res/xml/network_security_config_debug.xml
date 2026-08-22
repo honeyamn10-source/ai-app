@@ -1,7 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <network-security-config>
-    <base-config cleartextTrafficPermitted="false" />
-    <domain-config cleartextTrafficPermitted="true">
-        <domain includeSubdomains="false">10.0.2.2</domain>
-    </domain-config>
+    <!-- Debug APKs may connect to a private-LAN Ollama server. Application-level
+         validation still rejects public cleartext hosts; release builds remain HTTPS-only. -->
+    <base-config cleartextTrafficPermitted="true" />
 </network-security-config>

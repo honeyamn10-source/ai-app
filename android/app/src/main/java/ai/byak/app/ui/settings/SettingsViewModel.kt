@@ -30,6 +30,8 @@ data class SettingsUiState(
     val openRouterModel: String = "openrouter/auto",
     val anthropicModel: String = "claude-sonnet-4-5",
     val geminiModel: String = "gemini-3.1-flash-lite",
+    val ollamaEndpoint: String = "http://192.168.1.20:11434",
+    val ollamaModel: String = "deepseek-coder:6.7b",
     val hasOpenAi: Boolean = false,
     val hasOpenRouter: Boolean = false,
     val hasAnthropic: Boolean = false,
@@ -72,6 +74,8 @@ class SettingsViewModel @Inject constructor(
             openRouterModel = secure.openRouterModel,
             anthropicModel = secure.anthropicModel,
             geminiModel = secure.geminiModel,
+            ollamaEndpoint = secure.ollamaEndpoint,
+            ollamaModel = secure.ollamaModel,
             hasOpenAi = secure.openAiKey.isNotBlank(),
             hasOpenRouter = secure.openRouterKey.isNotBlank(),
             hasAnthropic = secure.anthropicKey.isNotBlank(),
@@ -84,15 +88,21 @@ class SettingsViewModel @Inject constructor(
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), SettingsUiState())
 
-    fun saveAndTestProvider(provider: AiProvider, newKey: String, model: String) {
+    fun saveAndTestProvider(provider: AiProvider, newKey: String, model: String, endpoint: String) {
         if (connection.value.testing) return
         viewModelScope.launch {
             connection.value = ConnectionUiState(testing = true, message = "Checking the secure connection…")
             val existing = secureStore.apiKey(provider.name)
             val effectiveKey = newKey.trim().ifBlank { existing }
-            connectionTester.test(provider, effectiveKey, model.trim())
+            val effectiveEndpoint = endpoint.trim().ifBlank { secureStore.snapshot().ollamaEndpoint }
+            connectionTester.test(provider, effectiveKey, model.trim(), effectiveEndpoint)
                 .onSuccess { report ->
-                    secureStore.saveProviderKey(provider.name, effectiveKey, report.resolvedModel)
+                    secureStore.saveProviderKey(
+                        provider = provider.name,
+                        key = report.normalizedCredential.ifBlank { effectiveKey },
+                        model = report.resolvedModel,
+                        endpoint = effectiveEndpoint,
+                    )
                     connection.value = ConnectionUiState(
                         message = report.message,
                         succeeded = true,

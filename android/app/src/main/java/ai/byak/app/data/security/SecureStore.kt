@@ -69,31 +69,37 @@ class SecureStore @Inject constructor(
         )
     }
 
-    suspend fun saveProviderKey(provider: String, key: String, model: String) = update {
+    suspend fun saveProviderKey(provider: String, key: String, model: String, endpoint: String = "") = update {
         when (provider.uppercase()) {
             "OPENAI" -> it.copy(
-                openAiKey = key.normalizedKey(),
+                openAiKey = normalizeCredential(ai.byak.app.domain.model.AiProvider.OPENAI, key).value,
                 selectedProvider = "OPENAI",
                 selectedModel = model.trim(),
                 openAiModel = model.trim(),
             )
             "OPENROUTER" -> it.copy(
-                openRouterKey = key.normalizedKey(),
+                openRouterKey = normalizeCredential(ai.byak.app.domain.model.AiProvider.OPENROUTER, key).value,
                 selectedProvider = "OPENROUTER",
                 selectedModel = model.trim(),
                 openRouterModel = model.trim(),
             )
             "ANTHROPIC" -> it.copy(
-                anthropicKey = key.normalizedKey(),
+                anthropicKey = normalizeCredential(ai.byak.app.domain.model.AiProvider.ANTHROPIC, key).value,
                 selectedProvider = "ANTHROPIC",
                 selectedModel = model.trim(),
                 anthropicModel = model.trim(),
             )
             "GEMINI" -> it.copy(
-                geminiKey = key.normalizedKey(),
+                geminiKey = normalizeCredential(ai.byak.app.domain.model.AiProvider.GEMINI, key).value,
                 selectedProvider = "GEMINI",
                 selectedModel = model.trim(),
                 geminiModel = model.trim(),
+            )
+            "OLLAMA" -> it.copy(
+                selectedProvider = "OLLAMA",
+                selectedModel = model.trim(),
+                ollamaModel = model.trim(),
+                ollamaEndpoint = endpoint.trim().trimEnd('/'),
             )
             "ON_DEVICE" -> it.copy(selectedProvider = "ON_DEVICE", selectedModel = ON_DEVICE_MODEL)
             else -> error("Unsupported AI provider: $provider")
@@ -113,6 +119,7 @@ class SecureStore @Inject constructor(
         "OPENROUTER" -> snapshot().openRouterKey
         "ANTHROPIC" -> snapshot().anthropicKey
         "GEMINI" -> snapshot().geminiKey
+        "OLLAMA" -> LOCAL_READY_SENTINEL
         "ON_DEVICE" -> ON_DEVICE_READY_SENTINEL
         else -> ""
     }
@@ -123,6 +130,7 @@ class SecureStore @Inject constructor(
             "OPENROUTER" -> state.openRouterModel
             "ANTHROPIC" -> state.anthropicModel
             "GEMINI" -> state.geminiModel
+            "OLLAMA" -> state.ollamaModel
             "ON_DEVICE" -> ON_DEVICE_MODEL
             else -> state.selectedModel
         }
@@ -130,13 +138,7 @@ class SecureStore @Inject constructor(
 
     companion object {
         const val ON_DEVICE_MODEL = "Gemini Nano"
+        private const val LOCAL_READY_SENTINEL = "local"
         private const val ON_DEVICE_READY_SENTINEL = "device"
     }
 }
-
-private fun String.normalizedKey(): String = trim()
-    .removeSurrounding("\"")
-    .removeSurrounding("'")
-    .removePrefix("Bearer ")
-    .removePrefix("bearer ")
-    .trim()

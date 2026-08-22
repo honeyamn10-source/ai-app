@@ -21,6 +21,8 @@ data class SecureState(
     val openRouterModel: String = "openrouter/auto",
     val anthropicModel: String = "claude-sonnet-4-5",
     val geminiModel: String = "gemini-3.1-flash-lite",
+    val ollamaEndpoint: String = "http://192.168.1.20:11434",
+    val ollamaModel: String = "deepseek-coder:6.7b",
     val openRouterImageModel: String = "openai/gpt-image-2",
     val geminiImageModel: String = "gemini-3.1-flash-image",
 )

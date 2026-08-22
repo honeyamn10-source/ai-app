@@ -11,7 +11,11 @@ internal fun providerFailure(provider: AiProvider, status: Int, body: String): S
     val name = provider.displayName()
     return when (status) {
         400 -> name + " could not use this request or model" + detail.suffix() + "."
-        401 -> name + " says this credential is missing, invalid, expired, or revoked" + detail.suffix() + "."
+        401 -> when (provider) {
+            AiProvider.OPENROUTER -> "OpenRouter rejected this key (HTTP 401). Create a fresh key in OpenRouter Settings and paste only the sk-or-v1 value" + detail.suffix() + "."
+            AiProvider.GEMINI -> "Gemini rejected this key (HTTP 401). Old, leaked, dormant, or incorrectly restricted keys can be blocked; create a new Gemini API key in Google AI Studio" + detail.suffix() + "."
+            else -> name + " rejected this credential (HTTP 401). It may be missing, invalid, expired, or revoked" + detail.suffix() + "."
+        }
         402 -> name + " accepted the key, but this account or key has no available credits" + detail.suffix() + "."
         403 -> name + " received the key but denied this request. Check API restrictions, key permissions, region, or provider guardrails" + detail.suffix() + "."
         404 -> name + " could not find the selected model or endpoint" + detail.suffix() + "."
@@ -31,6 +35,10 @@ internal fun providerMessage(body: String): String {
         else -> root?.string("message")
     } ?: body.lineSequence().firstOrNull { it.isNotBlank() }
     return raw.orEmpty()
+        .replace(
+            Regex("""(?i)(api[_-]?key|access[_-]?token|authorization|token)[\"'\s:=]+[A-Za-z0-9._~+/\-=]{8,}"""),
+            "$1 ••••",
+        )
         .replace(Regex("""(?i)Bearer\s+[A-Za-z0-9._~+/\-=]+"""), "Bearer ••••")
         .replace(Regex("""(?i)(sk|AIza)[A-Za-z0-9_\-]{8,}"""), "••••")
         .replace(Regex("\\s+"), " ")
@@ -43,6 +51,7 @@ internal fun AiProvider.displayName(): String = when (this) {
     AiProvider.OPENROUTER -> "OpenRouter"
     AiProvider.ANTHROPIC -> "Anthropic"
     AiProvider.GEMINI -> "Gemini"
+    AiProvider.OLLAMA -> "Ollama"
     AiProvider.ON_DEVICE -> "Gemini Nano"
 }
 
