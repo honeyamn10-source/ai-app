@@ -51,7 +51,6 @@ internal fun AiProvider.displayName(): String = when (this) {
     AiProvider.OPENROUTER -> "OpenRouter"
     AiProvider.ANTHROPIC -> "Anthropic"
     AiProvider.GEMINI -> "Gemini"
-    AiProvider.OLLAMA -> "Ollama"
     AiProvider.ON_DEVICE -> "Gemini Nano"
 }
 

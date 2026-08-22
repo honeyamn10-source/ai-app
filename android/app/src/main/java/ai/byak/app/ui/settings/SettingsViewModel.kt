@@ -24,14 +24,12 @@ import kotlinx.coroutines.launch
 @Immutable
 data class SettingsUiState(
     val session: Session? = null,
-    val provider: AiProvider = AiProvider.OPENAI,
-    val model: String = "gpt-5-mini",
+    val provider: AiProvider = AiProvider.ON_DEVICE,
+    val model: String = "Gemini Nano",
     val openAiModel: String = "gpt-5-mini",
     val openRouterModel: String = "openrouter/auto",
     val anthropicModel: String = "claude-sonnet-4-5",
     val geminiModel: String = "gemini-3.1-flash-lite",
-    val ollamaEndpoint: String = "http://192.168.1.20:11434",
-    val ollamaModel: String = "deepseek-coder:6.7b",
     val hasOpenAi: Boolean = false,
     val hasOpenRouter: Boolean = false,
     val hasAnthropic: Boolean = false,
@@ -68,14 +66,12 @@ class SettingsViewModel @Inject constructor(
     ) { secure, session, billing, connectionState ->
         SettingsUiState(
             session = session,
-            provider = runCatching { AiProvider.valueOf(secure.selectedProvider) }.getOrDefault(AiProvider.OPENAI),
+            provider = runCatching { AiProvider.valueOf(secure.selectedProvider) }.getOrDefault(AiProvider.ON_DEVICE),
             model = secure.selectedModel,
             openAiModel = secure.openAiModel,
             openRouterModel = secure.openRouterModel,
             anthropicModel = secure.anthropicModel,
             geminiModel = secure.geminiModel,
-            ollamaEndpoint = secure.ollamaEndpoint,
-            ollamaModel = secure.ollamaModel,
             hasOpenAi = secure.openAiKey.isNotBlank(),
             hasOpenRouter = secure.openRouterKey.isNotBlank(),
             hasAnthropic = secure.anthropicKey.isNotBlank(),
@@ -88,20 +84,18 @@ class SettingsViewModel @Inject constructor(
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), SettingsUiState())
 
-    fun saveAndTestProvider(provider: AiProvider, newKey: String, model: String, endpoint: String) {
+    fun saveAndTestProvider(provider: AiProvider, newKey: String, model: String) {
         if (connection.value.testing) return
         viewModelScope.launch {
             connection.value = ConnectionUiState(testing = true, message = "Checking the secure connection…")
             val existing = secureStore.apiKey(provider.name)
             val effectiveKey = newKey.trim().ifBlank { existing }
-            val effectiveEndpoint = endpoint.trim().ifBlank { secureStore.snapshot().ollamaEndpoint }
-            connectionTester.test(provider, effectiveKey, model.trim(), effectiveEndpoint)
+            connectionTester.test(provider, effectiveKey, model.trim())
                 .onSuccess { report ->
                     secureStore.saveProviderKey(
                         provider = provider.name,
                         key = report.normalizedCredential.ifBlank { effectiveKey },
                         model = report.resolvedModel,
-                        endpoint = effectiveEndpoint,
                     )
                     connection.value = ConnectionUiState(
                         message = report.message,

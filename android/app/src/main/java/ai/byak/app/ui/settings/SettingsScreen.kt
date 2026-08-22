@@ -243,14 +243,13 @@ private fun PlanRow(plan: PlanOffer, available: Boolean, active: Boolean, purcha
 private fun ProviderDialog(
     state: SettingsUiState,
     dismiss: () -> Unit,
-    save: (AiProvider, String, String, String) -> Unit,
+    save: (AiProvider, String, String) -> Unit,
 ) {
     var provider by remember { mutableStateOf(state.provider) }
     var key by remember { mutableStateOf("") }
     var model by remember(provider) { mutableStateOf(state.modelFor(provider)) }
-    var endpoint by remember(provider) { mutableStateOf(if (provider == AiProvider.OLLAMA) state.ollamaEndpoint else "") }
     val uriHandler = LocalUriHandler.current
-    val needsKey = provider !in setOf(AiProvider.ON_DEVICE, AiProvider.OLLAMA)
+    val needsKey = provider != AiProvider.ON_DEVICE
     val hasExisting = needsKey && state.hasKeyFor(provider)
     AlertDialog(
         onDismissRequest = { if (!state.testingConnection) dismiss() },
@@ -258,7 +257,7 @@ private fun ProviderDialog(
         title = { Text("Connect your AI") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Text("Choose a provider and model. BYAK tests the same generation route used by Chat before saving.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text("Phone AI works without a key. Cloud providers are optional and are tested through the same generation route used by Chat before saving.", color = MaterialTheme.colorScheme.onSurfaceVariant)
                 LazyRow(horizontalArrangement = Arrangement.spacedBy(7.dp)) {
                     items(AiProvider.entries, key = { it.name }) { item ->
                         AssistChip(
@@ -272,14 +271,7 @@ private fun ProviderDialog(
                 }
                 AnimatedVisibility(provider == AiProvider.ON_DEVICE) {
                     Text(
-                        "Runs privately with Gemini Nano through Android AICore. Availability depends on this phone; no API key is needed.",
-                        color = CyberTeal,
-                        fontSize = 12.sp,
-                    )
-                }
-                AnimatedVisibility(provider == AiProvider.OLLAMA) {
-                    Text(
-                        "Runs with Ollama on your computer over private Wi-Fi. No cloud account or API key is required. Keep Ollama and the phone on the same network.",
+                        "Runs privately with Gemini Nano through Android AICore. BYAK prepares it automatically on first use; no laptop, separate server, or API key is needed.",
                         color = CyberTeal,
                         fontSize = 12.sp,
                     )
@@ -300,18 +292,6 @@ private fun ProviderDialog(
                             shape = RoundedCornerShape(16.dp),
                         )
                     }
-                }
-                AnimatedVisibility(provider == AiProvider.OLLAMA) {
-                    OutlinedTextField(
-                        value = endpoint,
-                        onValueChange = { endpoint = it },
-                        modifier = Modifier.fillMaxWidth(),
-                        label = { Text("Computer address") },
-                        supportingText = { Text("Example: http://192.168.1.20:11434") },
-                        singleLine = true,
-                        enabled = !state.testingConnection,
-                        shape = RoundedCornerShape(16.dp),
-                    )
                 }
                 AnimatedVisibility(provider != AiProvider.ON_DEVICE) {
                     OutlinedTextField(
@@ -358,9 +338,8 @@ private fun ProviderDialog(
                         needsKey -> {
                         "The key is sent only to ${provider.displayName()}'s official API and remains encrypted on this device."
                         }
-                        provider == AiProvider.OLLAMA -> "The debug APK permits private-LAN HTTP for Ollama; Play/release builds require a secure HTTPS endpoint."
                         else -> {
-                        "BYAK checks Android's on-device model and downloads it only through the system service when required."
+                        "BYAK checks Android AICore and prepares Gemini Nano directly on this phone. No laptop, local server, or API key is required."
                         }
                     },
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -370,18 +349,16 @@ private fun ProviderDialog(
         },
         confirmButton = {
             Button(
-                onClick = { save(provider, key, model, endpoint) },
+                onClick = { save(provider, key, model) },
                 enabled = !state.testingConnection && (
                     provider == AiProvider.ON_DEVICE ||
-                        (provider == AiProvider.OLLAMA && endpoint.isNotBlank() && model.isNotBlank()) ||
                         (model.isNotBlank() && (hasExisting || key.isNotBlank()))
                 ),
             ) {
                 if (state.testingConnection) CircularProgressIndicator(Modifier.size(17.dp), strokeWidth = 2.dp)
                 else Text(
                     when {
-                        provider == AiProvider.ON_DEVICE -> "Check offline AI"
-                        provider == AiProvider.OLLAMA -> "Connect local AI"
+                        provider == AiProvider.ON_DEVICE -> "Prepare Phone AI"
                         hasExisting -> "Update & test"
                         else -> "Connect & test"
                     },
@@ -397,7 +374,6 @@ private fun SettingsUiState.hasKeyFor(provider: AiProvider): Boolean = when (pro
     AiProvider.OPENROUTER -> hasOpenRouter
     AiProvider.ANTHROPIC -> hasAnthropic
     AiProvider.GEMINI -> hasGemini
-    AiProvider.OLLAMA -> ollamaEndpoint.isNotBlank() && ollamaModel.isNotBlank()
     AiProvider.ON_DEVICE -> true
 }
 
@@ -406,8 +382,7 @@ private fun AiProvider.displayName(): String = when (this) {
     AiProvider.OPENROUTER -> "OpenRouter"
     AiProvider.ANTHROPIC -> "Claude"
     AiProvider.GEMINI -> "Gemini"
-    AiProvider.OLLAMA -> "Local Ollama"
-    AiProvider.ON_DEVICE -> "On device"
+    AiProvider.ON_DEVICE -> "Phone AI"
 }
 
 private fun AiProvider.defaultModel(): String = when (this) {
@@ -415,7 +390,6 @@ private fun AiProvider.defaultModel(): String = when (this) {
     AiProvider.OPENROUTER -> "openrouter/auto"
     AiProvider.ANTHROPIC -> "claude-sonnet-4-5"
     AiProvider.GEMINI -> "gemini-3.1-flash-lite"
-    AiProvider.OLLAMA -> "deepseek-coder:6.7b"
     AiProvider.ON_DEVICE -> "Gemini Nano"
 }
 
@@ -424,8 +398,7 @@ private fun AiProvider.modelHint(): String = when (this) {
     AiProvider.OPENAI -> "Example: gpt-5-mini"
     AiProvider.ANTHROPIC -> "Example: claude-sonnet-4-5"
     AiProvider.GEMINI -> "Example: gemini-3.1-flash-lite"
-    AiProvider.OLLAMA -> "Use an installed Ollama model name; BYAK discovers available models when testing."
-    AiProvider.ON_DEVICE -> "No cloud model or API key required."
+    AiProvider.ON_DEVICE -> "Runs on this phone through Android AICore; no cloud key is required."
 }
 
 private fun SettingsUiState.modelFor(provider: AiProvider): String = when (provider) {
@@ -433,7 +406,6 @@ private fun SettingsUiState.modelFor(provider: AiProvider): String = when (provi
     AiProvider.OPENROUTER -> openRouterModel
     AiProvider.ANTHROPIC -> anthropicModel
     AiProvider.GEMINI -> geminiModel
-    AiProvider.OLLAMA -> ollamaModel
     AiProvider.ON_DEVICE -> "Gemini Nano"
 }
 
@@ -442,5 +414,5 @@ private fun AiProvider.keyHelpUrl(): String? = when (this) {
     AiProvider.GEMINI -> "https://aistudio.google.com/app/apikey"
     AiProvider.OPENAI -> "https://platform.openai.com/api-keys"
     AiProvider.ANTHROPIC -> "https://console.anthropic.com/settings/keys"
-    AiProvider.OLLAMA, AiProvider.ON_DEVICE -> null
+    AiProvider.ON_DEVICE -> null
 }

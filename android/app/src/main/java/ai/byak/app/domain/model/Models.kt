@@ -48,7 +48,7 @@ enum class AgentStage { PLAN, RESEARCH, SYNTHESIZE, RESULT }
 enum class AgentStatus { QUEUED, RUNNING, SUCCEEDED, FAILED, CANCELLED }
 enum class StepStatus { PENDING, RUNNING, COMPLETE, FAILED }
 enum class MessageRole { USER, ASSISTANT, SYSTEM }
-enum class AiProvider { OPENAI, OPENROUTER, ANTHROPIC, GEMINI, OLLAMA, ON_DEVICE }
+enum class AiProvider { ON_DEVICE, OPENROUTER, GEMINI, OPENAI, ANTHROPIC }
 
 enum class ImageProvider { OPENROUTER, GEMINI }
 enum class ImageResolution { ONE_K, TWO_K, FOUR_K }
