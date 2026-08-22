@@ -3,7 +3,6 @@ package ai.byak.app.billing
 import android.app.Activity
 import android.content.Context
 import ai.byak.app.core.di.ApplicationScope
-import ai.byak.app.data.security.SecureStore
 import com.android.billingclient.api.AcknowledgePurchaseParams
 import com.android.billingclient.api.BillingClient
 import com.android.billingclient.api.BillingClientStateListener
@@ -30,7 +29,6 @@ import kotlinx.coroutines.launch
 class BillingManager @Inject constructor(
     @ApplicationContext context: Context,
     private val verifier: BillingVerificationRepository,
-    private val secureStore: SecureStore,
     @ApplicationScope private val scope: CoroutineScope,
 ) : PurchasesUpdatedListener {
     private val mutableState = MutableStateFlow(BillingState())
