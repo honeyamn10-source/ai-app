@@ -4,13 +4,20 @@ import ai.byak.app.domain.model.AiProvider
 import io.ktor.client.HttpClient
 import io.ktor.client.request.get
 import io.ktor.client.request.header
+import io.ktor.client.request.post
+import io.ktor.client.request.setBody
 import io.ktor.client.statement.bodyAsText
+import io.ktor.http.ContentType
 import io.ktor.http.HttpHeaders
+import io.ktor.http.contentType
 import io.ktor.http.isSuccess
 import java.net.URLEncoder
 import java.nio.charset.StandardCharsets
 import javax.inject.Inject
 import javax.inject.Singleton
+import kotlinx.serialization.json.buildJsonArray
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 
 @Singleton
 class ProviderConnectionTester @Inject constructor(
@@ -24,10 +31,23 @@ class ProviderConnectionTester @Inject constructor(
             AiProvider.OPENAI -> client.get("https://api.openai.com/v1/models") {
                 header(HttpHeaders.Authorization, "Bearer $apiKey")
             }
-            AiProvider.OPENROUTER -> client.get("https://openrouter.ai/api/v1/models") {
+            AiProvider.OPENROUTER -> client.post("https://openrouter.ai/api/v1/chat/completions") {
                 header(HttpHeaders.Authorization, "Bearer $apiKey")
                 header("HTTP-Referer", "https://byak.ai")
                 header("X-OpenRouter-Title", "BYAK AI")
+                contentType(ContentType.Application.Json)
+                // Validate the exact model and account routing used by Chat—not just /models,
+                // which can succeed for a key that cannot actually generate a response.
+                setBody(buildJsonObject {
+                    put("model", model.trim())
+                    put("max_tokens", 1)
+                    put("messages", buildJsonArray {
+                        add(buildJsonObject {
+                            put("role", "user")
+                            put("content", "Reply OK")
+                        })
+                    })
+                })
             }
             AiProvider.ANTHROPIC -> client.get("https://api.anthropic.com/v1/models") {
                 header("x-api-key", apiKey)
