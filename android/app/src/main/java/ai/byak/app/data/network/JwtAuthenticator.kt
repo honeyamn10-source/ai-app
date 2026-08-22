@@ -1,6 +1,8 @@
 package ai.byak.app.data.network
 
+import ai.byak.app.BuildConfig
 import ai.byak.app.data.security.SecureStore
+import java.net.URI
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.coroutines.runBlocking
@@ -15,8 +17,14 @@ class JwtAuthenticator @Inject constructor(
     private val refreshService: RefreshTokenService,
 ) : Authenticator {
     private val refreshLock = Any()
+    private val backendHost = runCatching { URI(BuildConfig.BYAK_BACKEND_BASE_URL).host }.getOrNull()
 
     override fun authenticate(route: Route?, response: Response): Request? {
+        // A provider 401 must never be retried with a BYAK backend JWT. Without this
+        // host gate, OpenRouter/Gemini credentials can be replaced by the wrong token.
+        if (backendHost == null || !response.request.url.host.equals(backendHost, ignoreCase = true)) {
+            return null
+        }
         if (response.retryCount() >= 2) return null
         return synchronized(refreshLock) {
             val state = secureStore.snapshot()

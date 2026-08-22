@@ -1,5 +1,6 @@
 package ai.byak.app.data.repository
 
+import ai.byak.app.data.localai.OnDeviceModelManager
 import ai.byak.app.data.security.SecureStore
 import ai.byak.app.domain.model.AiProvider
 import ai.byak.app.domain.model.MessageRole
@@ -43,8 +44,13 @@ class KtorStreamingRepository @Inject constructor(
     private val client: HttpClient,
     private val secureStore: SecureStore,
     private val json: Json,
+    private val onDevice: OnDeviceModelManager,
 ) : StreamingRepository {
     override fun stream(request: StreamingRequest): Flow<StreamChunk> = flow {
+        if (request.provider == AiProvider.ON_DEVICE) {
+            onDevice.stream(request).collect { emit(it) }
+            return@flow
+        }
         val apiKey = secureStore.apiKey(request.provider.name)
         require(apiKey.isNotBlank()) { "Add your ${request.provider.displayName()} API key in You → AI connection." }
 
@@ -63,12 +69,17 @@ class KtorStreamingRepository @Inject constructor(
                     if (!response.status.isSuccess()) {
                         val detail = response.bodyAsText().take(2_000)
                         if (response.status.value == 429 || response.status.value >= 500) {
+                            val retryAfter = response.headers[HttpHeaders.RetryAfter]
+                                ?.toLongOrNull()
+                                ?.coerceIn(1, 60)
+                                ?.times(1_000)
                             throw RetryableStreamException(
                                 response.status.value,
-                                providerError(request.provider, response.status.value, detail),
+                                providerFailure(request.provider, response.status.value, detail),
+                                retryAfter,
                             )
                         }
-                        error(providerError(request.provider, response.status.value, detail))
+                        error(providerFailure(request.provider, response.status.value, detail))
                     }
 
                     val channel = response.bodyAsChannel()
@@ -77,6 +88,11 @@ class KtorStreamingRepository @Inject constructor(
                         if (!line.startsWith("data:")) continue
                         val data = line.removePrefix("data:").trimStart()
                         if (data.isBlank() || data == "[DONE]") continue
+                        val eventError = providerMessage(data)
+                            .takeIf { data.contains("\"error\"") && it.isNotBlank() }
+                        if (eventError != null) {
+                            error(request.provider.displayName() + " stream failed: " + eventError)
+                        }
                         val delta = parseDelta(request.provider, data)
                         if (!delta.isNullOrEmpty()) {
                             emittedAny = true
@@ -93,7 +109,7 @@ class KtorStreamingRepository @Inject constructor(
                 if (emittedAny || retry >= MAX_RETRIES) throw retryable
                 val exponential = INITIAL_BACKOFF_MS * (1L shl retry)
                 val jitter = Random.nextLong(0, 400)
-                delay(min(MAX_BACKOFF_MS, exponential) + jitter)
+                delay(retryable.retryAfterMillis ?: (min(MAX_BACKOFF_MS, exponential) + jitter))
                 retry++
             }
         }
@@ -105,6 +121,7 @@ class KtorStreamingRepository @Inject constructor(
             apiKey = apiKey,
             request = request,
             headers = emptyMap(),
+            tokenField = "max_completion_tokens",
         )
         AiProvider.OPENROUTER -> openAiCompatibleEndpoint(
             url = "https://openrouter.ai/api/v1/chat/completions",
@@ -114,6 +131,7 @@ class KtorStreamingRepository @Inject constructor(
                 "HTTP-Referer" to "https://byak.ai",
                 "X-OpenRouter-Title" to "BYAK AI",
             ),
+            tokenField = "max_tokens",
         )
         AiProvider.ANTHROPIC -> Endpoint(
             url = "https://api.anthropic.com/v1/messages",
@@ -134,8 +152,8 @@ class KtorStreamingRepository @Inject constructor(
             },
         )
         AiProvider.GEMINI -> Endpoint(
-            url = "https://generativelanguage.googleapis.com/v1beta/models/${urlEncode(request.model)}:streamGenerateContent?alt=sse&key=${urlEncode(apiKey)}",
-            headers = emptyMap(),
+            url = "https://generativelanguage.googleapis.com/v1beta/models/${urlEncode(request.model)}:streamGenerateContent?alt=sse",
+            headers = mapOf("x-goog-api-key" to apiKey),
             body = buildJsonObject {
                 request.systemPrompt?.takeIf(String::isNotBlank)?.let { prompt ->
                     put("systemInstruction", buildJsonObject {
@@ -153,6 +171,7 @@ class KtorStreamingRepository @Inject constructor(
                 put("generationConfig", buildJsonObject { put("maxOutputTokens", request.maxTokens) })
             },
         )
+        AiProvider.ON_DEVICE -> error("On-device requests do not use a network endpoint")
     }
 
     private fun openAiCompatibleEndpoint(
@@ -160,6 +179,7 @@ class KtorStreamingRepository @Inject constructor(
         apiKey: String,
         request: StreamingRequest,
         headers: Map<String, String>,
+        tokenField: String,
     ) = Endpoint(
         url = url,
         headers = mapOf(HttpHeaders.Authorization to "Bearer $apiKey") + headers,
@@ -167,7 +187,7 @@ class KtorStreamingRepository @Inject constructor(
             put("model", request.model)
             put("stream", true)
             put("stream_options", buildJsonObject { put("include_usage", true) })
-            put("max_tokens", request.maxTokens)
+            put(tokenField, request.maxTokens)
             put("messages", buildJsonArray {
                 request.systemPrompt?.takeIf(String::isNotBlank)?.let { prompt ->
                     add(buildJsonObject { put("role", "system"); put("content", prompt) })
@@ -190,19 +210,7 @@ class KtorStreamingRepository @Inject constructor(
             AiProvider.ANTHROPIC -> root.objectValue("delta")?.string("text")
             AiProvider.GEMINI -> root.array("candidates")?.firstObject()
                 ?.objectValue("content")?.array("parts")?.firstObject()?.string("text")
-        }
-    }
-
-    private fun providerError(provider: AiProvider, status: Int, detail: String): String {
-        val name = provider.displayName()
-        return when (status) {
-            400 -> "$name rejected this request. Check the selected model name."
-            401, 403 -> "$name did not accept this API key. Open You → AI connection and save a valid key."
-            402 -> "$name reports insufficient credits. Add credits or select a free/available model."
-            404 -> "$name could not find the selected model. Choose a model enabled for your account."
-            429 -> "$name is rate-limiting requests. BYAK retried safely; wait a moment and try again."
-            in 500..599 -> "$name is temporarily unavailable after ${MAX_RETRIES + 1} attempts."
-            else -> "$name returned HTTP $status: ${detail.extractProviderMessage().ifBlank { "Request failed" }}"
+            AiProvider.ON_DEVICE -> null
         }
     }
 
@@ -212,17 +220,10 @@ class KtorStreamingRepository @Inject constructor(
         MessageRole.SYSTEM -> "system"
     }
 
-    private fun AiProvider.displayName(): String = when (this) {
-        AiProvider.OPENAI -> "OpenAI"
-        AiProvider.OPENROUTER -> "OpenRouter"
-        AiProvider.ANTHROPIC -> "Anthropic"
-        AiProvider.GEMINI -> "Gemini"
-    }
-
     private fun urlEncode(value: String): String = URLEncoder.encode(value, StandardCharsets.UTF_8.toString())
 
     private data class Endpoint(val url: String, val headers: Map<String, String>, val body: JsonObject)
-    private class RetryableStreamException(code: Int, detail: String) :
+    private class RetryableStreamException(code: Int, detail: String, val retryAfterMillis: Long?) :
         IllegalStateException(detail.ifBlank { "Temporary provider error $code" })
 
     private companion object {
@@ -231,9 +232,6 @@ class KtorStreamingRepository @Inject constructor(
         const val MAX_BACKOFF_MS = 8_000L
     }
 }
-
-private fun String.extractProviderMessage(): String =
-    lineSequence().firstOrNull { it.isNotBlank() }?.take(400).orEmpty()
 
 private fun JsonObject.string(key: String): String? = this[key]?.jsonPrimitive?.contentOrNull
 private fun JsonObject.objectValue(key: String): JsonObject? = this[key] as? JsonObject

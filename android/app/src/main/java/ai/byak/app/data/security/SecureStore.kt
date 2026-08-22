@@ -71,11 +71,40 @@ class SecureStore @Inject constructor(
 
     suspend fun saveProviderKey(provider: String, key: String, model: String) = update {
         when (provider.uppercase()) {
-            "OPENAI" -> it.copy(openAiKey = key.trim(), selectedProvider = "OPENAI", selectedModel = model.trim())
-            "OPENROUTER" -> it.copy(openRouterKey = key.trim(), selectedProvider = "OPENROUTER", selectedModel = model.trim())
-            "ANTHROPIC" -> it.copy(anthropicKey = key.trim(), selectedProvider = "ANTHROPIC", selectedModel = model.trim())
-            "GEMINI" -> it.copy(geminiKey = key.trim(), selectedProvider = "GEMINI", selectedModel = model.trim())
+            "OPENAI" -> it.copy(
+                openAiKey = key.normalizedKey(),
+                selectedProvider = "OPENAI",
+                selectedModel = model.trim(),
+                openAiModel = model.trim(),
+            )
+            "OPENROUTER" -> it.copy(
+                openRouterKey = key.normalizedKey(),
+                selectedProvider = "OPENROUTER",
+                selectedModel = model.trim(),
+                openRouterModel = model.trim(),
+            )
+            "ANTHROPIC" -> it.copy(
+                anthropicKey = key.normalizedKey(),
+                selectedProvider = "ANTHROPIC",
+                selectedModel = model.trim(),
+                anthropicModel = model.trim(),
+            )
+            "GEMINI" -> it.copy(
+                geminiKey = key.normalizedKey(),
+                selectedProvider = "GEMINI",
+                selectedModel = model.trim(),
+                geminiModel = model.trim(),
+            )
+            "ON_DEVICE" -> it.copy(selectedProvider = "ON_DEVICE", selectedModel = ON_DEVICE_MODEL)
             else -> error("Unsupported AI provider: $provider")
+        }
+    }
+
+    suspend fun saveImageModel(provider: String, model: String) = update {
+        when (provider.uppercase()) {
+            "OPENROUTER" -> it.copy(openRouterImageModel = model.trim())
+            "GEMINI" -> it.copy(geminiImageModel = model.trim())
+            else -> error("Unsupported image provider: $provider")
         }
     }
 
@@ -84,6 +113,30 @@ class SecureStore @Inject constructor(
         "OPENROUTER" -> snapshot().openRouterKey
         "ANTHROPIC" -> snapshot().anthropicKey
         "GEMINI" -> snapshot().geminiKey
+        "ON_DEVICE" -> ON_DEVICE_READY_SENTINEL
         else -> ""
     }
+
+    fun model(provider: String): String = snapshot().let { state ->
+        when (provider.uppercase()) {
+            "OPENAI" -> state.openAiModel
+            "OPENROUTER" -> state.openRouterModel
+            "ANTHROPIC" -> state.anthropicModel
+            "GEMINI" -> state.geminiModel
+            "ON_DEVICE" -> ON_DEVICE_MODEL
+            else -> state.selectedModel
+        }
+    }
+
+    companion object {
+        const val ON_DEVICE_MODEL = "Gemini Nano"
+        private const val ON_DEVICE_READY_SENTINEL = "device"
+    }
 }
+
+private fun String.normalizedKey(): String = trim()
+    .removeSurrounding("\"")
+    .removeSurrounding("'")
+    .removePrefix("Bearer ")
+    .removePrefix("bearer ")
+    .trim()
