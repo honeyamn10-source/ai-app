@@ -1,6 +1,9 @@
 package ai.byak.app.data.repository
 
+import ai.byak.app.BuildConfig
+import ai.byak.app.data.localai.validateOllamaEndpoint
 import ai.byak.app.data.localai.OnDeviceModelManager
+import ai.byak.app.data.security.normalizeCredential
 import ai.byak.app.domain.model.AiProvider
 import io.ktor.client.HttpClient
 import io.ktor.client.request.get
@@ -29,6 +32,7 @@ data class ProviderConnectionReport(
     val resolvedModel: String,
     val availableModels: List<String>,
     val message: String,
+    val normalizedCredential: String = "",
 )
 
 @Singleton
@@ -37,7 +41,12 @@ class ProviderConnectionTester @Inject constructor(
     private val json: Json,
     private val onDevice: OnDeviceModelManager,
 ) {
-    suspend fun test(provider: AiProvider, apiKey: String, model: String): Result<ProviderConnectionReport> =
+    suspend fun test(
+        provider: AiProvider,
+        apiKey: String,
+        model: String,
+        endpoint: String = "",
+    ): Result<ProviderConnectionReport> =
         runCatching {
             if (provider == AiProvider.ON_DEVICE) {
                 val prepared = onDevice.prepare()
@@ -49,24 +58,29 @@ class ProviderConnectionTester @Inject constructor(
                 )
             }
 
-            val key = apiKey.normalizedCredential()
+            if (provider == AiProvider.OLLAMA) {
+                return@runCatching testOllama(endpoint, model)
+            }
+
+            val normalized = normalizeCredential(provider, apiKey)
+            val key = normalized.value
             require(key.isNotBlank()) { "Enter an API key first." }
-            when (provider) {
+            val report = when (provider) {
                 AiProvider.OPENROUTER -> testOpenRouter(key, model)
                 AiProvider.GEMINI -> testGemini(key, model)
                 AiProvider.OPENAI -> testOpenAi(key, model)
                 AiProvider.ANTHROPIC -> testAnthropic(key, model)
-                AiProvider.ON_DEVICE -> error("Handled above")
+                AiProvider.OLLAMA, AiProvider.ON_DEVICE -> error("Handled above")
             }
+            report.copy(
+                normalizedCredential = key,
+                message = report.message + if (normalized.repaired) {
+                    " BYAK safely extracted the key value from the text you pasted."
+                } else "",
+            )
         }
 
     private suspend fun testOpenRouter(key: String, requestedModel: String): ProviderConnectionReport {
-        requireSuccess(
-            AiProvider.OPENROUTER,
-            client.get("https://openrouter.ai/api/v1/key") {
-                header(HttpHeaders.Authorization, "Bearer $key")
-            },
-        )
         val catalogBody = requireSuccess(
             AiProvider.OPENROUTER,
             client.get("https://openrouter.ai/api/v1/models?output_modalities=text&limit=1000") {
@@ -97,6 +111,48 @@ class ProviderConnectionTester @Inject constructor(
             ""
         }
         return report(AiProvider.OPENROUTER, requestedModel, resolved, models, note)
+    }
+
+    private suspend fun testOllama(rawEndpoint: String, requestedModel: String): ProviderConnectionReport {
+        val base = validateOllamaEndpoint(rawEndpoint, allowPrivateHttp = BuildConfig.DEBUG).baseUrl
+        return try {
+            val catalog = requireSuccess(
+                AiProvider.OLLAMA,
+                client.get("$base/api/tags"),
+            )
+            val models = parseOllamaModels(catalog)
+            val cleanRequested = requestedModel.trim()
+            val resolved = when {
+                cleanRequested in models -> cleanRequested
+                models.isNotEmpty() -> models.first()
+                else -> error("Ollama is reachable but has no installed model. Run ollama pull deepseek-coder:6.7b on the computer first.")
+            }
+            val probe = client.post("$base/api/chat") {
+                contentType(ContentType.Application.Json)
+                setBody(buildJsonObject {
+                    put("model", resolved)
+                    put("stream", false)
+                    put("messages", buildJsonArray {
+                        add(buildJsonObject { put("role", "user"); put("content", "Reply OK") })
+                    })
+                    put("options", buildJsonObject { put("num_predict", 8) })
+                })
+            }
+            val probeBody = probe.bodyAsText()
+            if (!probe.status.isSuccess()) {
+                error(providerFailure(AiProvider.OLLAMA, probe.status.value, probeBody))
+            }
+            report(AiProvider.OLLAMA, requestedModel, resolved, models).copy(
+                message = "Local Ollama is connected. $resolved is ready; prompts stay on your Wi-Fi network.",
+            )
+        } catch (error: Throwable) {
+            val known = error.message.orEmpty()
+            if (known.contains("Ollama", ignoreCase = true) && !known.contains("connect", ignoreCase = true)) throw error
+            throw IllegalStateException(
+                "Could not reach Ollama at $base. On the computer, start Ollama for your Wi-Fi network, allow port 11434 in the private firewall zone, and use the computer's Wi-Fi IP—not 10.0.2.2.",
+                error,
+            )
+        }
     }
 
     private suspend fun testGemini(key: String, requestedModel: String): ProviderConnectionReport {
@@ -223,6 +279,14 @@ class ProviderConnectionTester @Inject constructor(
         }.distinct().sorted()
     }
 
+    private fun parseOllamaModels(body: String): List<String> {
+        val root = json.parseToJsonElement(body) as? JsonObject ?: return emptyList()
+        return (root["models"] as? JsonArray).orEmpty()
+            .mapNotNull { (it as? JsonObject)?.string("name") }
+            .distinct()
+            .sorted()
+    }
+
     private fun resolveModel(
         requested: String,
         available: List<String>,
@@ -252,13 +316,6 @@ class ProviderConnectionTester @Inject constructor(
         const val MAX_BODY = 1_000_000
     }
 }
-
-private fun String.normalizedCredential(): String = trim()
-    .removeSurrounding("\"")
-    .removeSurrounding("'")
-    .removePrefix("Bearer ")
-    .removePrefix("bearer ")
-    .trim()
 
 private fun JsonObject.string(key: String): String? =
     runCatching { this[key]?.jsonPrimitive?.contentOrNull }.getOrNull()

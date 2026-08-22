@@ -293,6 +293,13 @@ private fun GoalDialog(template: AgentTemplate, dismiss: () -> Unit, submit: (St
                     Text("Example: ${template.example}", Modifier.padding(12.dp), color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
                 }
                 OutlinedTextField(goal, { goal = it.take(4_000) }, label = { Text("Your goal") }, minLines = 4, maxLines = 8, shape = RoundedCornerShape(18.dp))
+                if (template.type == AgentType.DEEP_RESEARCH || template.type == AgentType.BUILDER) {
+                    Text(
+                        "Public search: your query is sent to GitHub and Wikipedia. Private library files are not included automatically.",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        fontSize = 11.sp,
+                    )
+                }
                 Text("${goal.length}/4000", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp, modifier = Modifier.align(Alignment.End))
             }
         },
@@ -312,8 +319,8 @@ private fun StatusIcon(status: AgentStatus) {
 }
 
 private fun agentTemplates() = listOf(
-    AgentTemplate(AgentType.DEEP_RESEARCH, "Deep Research", "Investigate evidence, uncertainty, and competing answers.", "Compare the best ways to launch my product in Canada and give me a sourced decision report.", Icons.Outlined.Search, Color(0xFF00E5FF)),
-    AgentTemplate(AgentType.BUILDER, "Builder", "Turn an app or product idea into an implementation package.", "Design an Android expense app with screens, data model, milestones, tests, and launch checklist.", Icons.Outlined.Code, Color(0xFFB68CFF)),
+    AgentTemplate(AgentType.DEEP_RESEARCH, "Deep Research", "Search GitHub and Wikipedia, compare evidence, and cite sources.", "Compare the best ways to launch my product in Canada and give me a sourced decision report.", Icons.Outlined.Search, Color(0xFF00E5FF)),
+    AgentTemplate(AgentType.BUILDER, "Builder", "Search relevant GitHub projects and turn an idea into a build package.", "Design an Android expense app with screens, data model, milestones, tests, and launch checklist.", Icons.Outlined.Code, Color(0xFFB68CFF)),
     AgentTemplate(AgentType.BUSINESS_PLANNER, "Business Planner", "Test positioning, economics, risks, and next moves.", "Create a 90-day plan to validate and sell my eco-packaging offer in Ontario.", Icons.Outlined.BusinessCenter, Color(0xFFFFD700)),
     AgentTemplate(AgentType.CONTENT_STUDIO, "Content Studio", "Create a consistent campaign, script, or content system.", "Create a 30-day launch campaign with hooks, scripts, captions, and a posting calendar.", Icons.Outlined.AutoAwesome, Color(0xFFFF8A65)),
     AgentTemplate(AgentType.STUDY_COACH, "Study Coach", "Build a learning path, lessons, practice, and review plan.", "Teach me Kotlin from beginner to job-ready with weekly projects and quizzes.", Icons.Outlined.Search, Color(0xFF69F0AE)),

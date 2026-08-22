@@ -1,6 +1,8 @@
 package ai.byak.app.data.repository
 
+import ai.byak.app.BuildConfig
 import ai.byak.app.data.localai.OnDeviceModelManager
+import ai.byak.app.data.localai.validateOllamaEndpoint
 import ai.byak.app.data.security.SecureStore
 import ai.byak.app.domain.model.AiProvider
 import ai.byak.app.domain.model.MessageRole
@@ -51,15 +53,18 @@ class KtorStreamingRepository @Inject constructor(
             onDevice.stream(request).collect { emit(it) }
             return@flow
         }
+        val secure = secureStore.snapshot()
         val apiKey = secureStore.apiKey(request.provider.name)
-        require(apiKey.isNotBlank()) { "Add your ${request.provider.displayName()} API key in You → AI connection." }
+        if (request.provider != AiProvider.OLLAMA) {
+            require(apiKey.isNotBlank()) { "Add your ${request.provider.displayName()} API key in You → AI connection." }
+        }
 
         var retry = 0
         var emittedAny = false
         while (true) {
             try {
                 val fullText = StringBuilder()
-                val endpoint = endpoint(request, apiKey)
+                val endpoint = endpoint(request, apiKey, secure.ollamaEndpoint)
                 client.preparePost(endpoint.url) {
                     contentType(ContentType.Application.Json)
                     accept(ContentType.Text.EventStream)
@@ -115,7 +120,7 @@ class KtorStreamingRepository @Inject constructor(
         }
     }
 
-    private fun endpoint(request: StreamingRequest, apiKey: String): Endpoint = when (request.provider) {
+    private fun endpoint(request: StreamingRequest, apiKey: String, ollamaEndpoint: String): Endpoint = when (request.provider) {
         AiProvider.OPENAI -> openAiCompatibleEndpoint(
             url = "https://api.openai.com/v1/chat/completions",
             apiKey = apiKey,
@@ -132,6 +137,14 @@ class KtorStreamingRepository @Inject constructor(
                 "X-OpenRouter-Title" to "BYAK AI",
             ),
             tokenField = "max_tokens",
+        )
+        AiProvider.OLLAMA -> openAiCompatibleEndpoint(
+            url = validateOllamaEndpoint(ollamaEndpoint, allowPrivateHttp = BuildConfig.DEBUG).baseUrl + "/v1/chat/completions",
+            apiKey = "",
+            request = request.copy(maxTokens = request.maxTokens.coerceAtMost(4_096)),
+            headers = emptyMap(),
+            tokenField = "max_tokens",
+            includeUsage = false,
         )
         AiProvider.ANTHROPIC -> Endpoint(
             url = "https://api.anthropic.com/v1/messages",
@@ -180,13 +193,14 @@ class KtorStreamingRepository @Inject constructor(
         request: StreamingRequest,
         headers: Map<String, String>,
         tokenField: String,
+        includeUsage: Boolean = true,
     ) = Endpoint(
         url = url,
-        headers = mapOf(HttpHeaders.Authorization to "Bearer $apiKey") + headers,
+        headers = (if (apiKey.isBlank()) emptyMap() else mapOf(HttpHeaders.Authorization to "Bearer $apiKey")) + headers,
         body = buildJsonObject {
             put("model", request.model)
             put("stream", true)
-            put("stream_options", buildJsonObject { put("include_usage", true) })
+            if (includeUsage) put("stream_options", buildJsonObject { put("include_usage", true) })
             put(tokenField, request.maxTokens)
             put("messages", buildJsonArray {
                 request.systemPrompt?.takeIf(String::isNotBlank)?.let { prompt ->
@@ -205,7 +219,7 @@ class KtorStreamingRepository @Inject constructor(
     private fun parseDelta(provider: AiProvider, data: String): String? {
         val root = runCatching { json.parseToJsonElement(data).jsonObject }.getOrNull() ?: return null
         return when (provider) {
-            AiProvider.OPENAI, AiProvider.OPENROUTER -> root.array("choices")?.firstObject()
+            AiProvider.OPENAI, AiProvider.OPENROUTER, AiProvider.OLLAMA -> root.array("choices")?.firstObject()
                 ?.objectValue("delta")?.string("content")
             AiProvider.ANTHROPIC -> root.objectValue("delta")?.string("text")
             AiProvider.GEMINI -> root.array("candidates")?.firstObject()

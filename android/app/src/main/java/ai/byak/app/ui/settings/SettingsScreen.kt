@@ -47,6 +47,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
@@ -242,12 +243,14 @@ private fun PlanRow(plan: PlanOffer, available: Boolean, active: Boolean, purcha
 private fun ProviderDialog(
     state: SettingsUiState,
     dismiss: () -> Unit,
-    save: (AiProvider, String, String) -> Unit,
+    save: (AiProvider, String, String, String) -> Unit,
 ) {
     var provider by remember { mutableStateOf(state.provider) }
     var key by remember { mutableStateOf("") }
     var model by remember(provider) { mutableStateOf(state.modelFor(provider)) }
-    val needsKey = provider != AiProvider.ON_DEVICE
+    var endpoint by remember(provider) { mutableStateOf(if (provider == AiProvider.OLLAMA) state.ollamaEndpoint else "") }
+    val uriHandler = LocalUriHandler.current
+    val needsKey = provider !in setOf(AiProvider.ON_DEVICE, AiProvider.OLLAMA)
     val hasExisting = needsKey && state.hasKeyFor(provider)
     AlertDialog(
         onDismissRequest = { if (!state.testingConnection) dismiss() },
@@ -274,6 +277,13 @@ private fun ProviderDialog(
                         fontSize = 12.sp,
                     )
                 }
+                AnimatedVisibility(provider == AiProvider.OLLAMA) {
+                    Text(
+                        "Runs with Ollama on your computer over private Wi-Fi. No cloud account or API key is required. Keep Ollama and the phone on the same network.",
+                        color = CyberTeal,
+                        fontSize = 12.sp,
+                    )
+                }
                 AnimatedVisibility(hasExisting) {
                     Text("A key is already stored. Leave this blank to test and keep it.", color = CyberTeal, fontSize = 12.sp)
                 }
@@ -289,17 +299,31 @@ private fun ProviderDialog(
                             enabled = !state.testingConnection,
                             shape = RoundedCornerShape(16.dp),
                         )
-                        OutlinedTextField(
-                            value = model,
-                            onValueChange = { model = it },
-                            modifier = Modifier.fillMaxWidth(),
-                            label = { Text("Model") },
-                            supportingText = { Text(provider.modelHint()) },
-                            singleLine = true,
-                            enabled = !state.testingConnection,
-                            shape = RoundedCornerShape(16.dp),
-                        )
                     }
+                }
+                AnimatedVisibility(provider == AiProvider.OLLAMA) {
+                    OutlinedTextField(
+                        value = endpoint,
+                        onValueChange = { endpoint = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        label = { Text("Computer address") },
+                        supportingText = { Text("Example: http://192.168.1.20:11434") },
+                        singleLine = true,
+                        enabled = !state.testingConnection,
+                        shape = RoundedCornerShape(16.dp),
+                    )
+                }
+                AnimatedVisibility(provider != AiProvider.ON_DEVICE) {
+                    OutlinedTextField(
+                        value = model,
+                        onValueChange = { model = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        label = { Text("Model") },
+                        supportingText = { Text(provider.modelHint()) },
+                        singleLine = true,
+                        enabled = !state.testingConnection,
+                        shape = RoundedCornerShape(16.dp),
+                    )
                 }
                 state.connectionMessage?.let { message ->
                     Row(verticalAlignment = Alignment.Top) {
@@ -324,11 +348,20 @@ private fun ProviderDialog(
                         )
                     }
                 }
+                AnimatedVisibility(state.connectionSucceeded == false && provider.keyHelpUrl() != null) {
+                    TextButton(onClick = { provider.keyHelpUrl()?.let(uriHandler::openUri) }) {
+                        Text(if (provider == AiProvider.GEMINI) "Create a new Gemini key" else "Open provider key settings")
+                    }
+                }
                 Text(
-                    if (needsKey) {
+                    when {
+                        needsKey -> {
                         "The key is sent only to ${provider.displayName()}'s official API and remains encrypted on this device."
-                    } else {
+                        }
+                        provider == AiProvider.OLLAMA -> "The debug APK permits private-LAN HTTP for Ollama; Play/release builds require a secure HTTPS endpoint."
+                        else -> {
                         "BYAK checks Android's on-device model and downloads it only through the system service when required."
+                        }
                     },
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     fontSize = 12.sp,
@@ -337,15 +370,18 @@ private fun ProviderDialog(
         },
         confirmButton = {
             Button(
-                onClick = { save(provider, key, model) },
+                onClick = { save(provider, key, model, endpoint) },
                 enabled = !state.testingConnection && (
-                    provider == AiProvider.ON_DEVICE || (model.isNotBlank() && (hasExisting || key.isNotBlank()))
+                    provider == AiProvider.ON_DEVICE ||
+                        (provider == AiProvider.OLLAMA && endpoint.isNotBlank() && model.isNotBlank()) ||
+                        (model.isNotBlank() && (hasExisting || key.isNotBlank()))
                 ),
             ) {
                 if (state.testingConnection) CircularProgressIndicator(Modifier.size(17.dp), strokeWidth = 2.dp)
                 else Text(
                     when {
                         provider == AiProvider.ON_DEVICE -> "Check offline AI"
+                        provider == AiProvider.OLLAMA -> "Connect local AI"
                         hasExisting -> "Update & test"
                         else -> "Connect & test"
                     },
@@ -361,6 +397,7 @@ private fun SettingsUiState.hasKeyFor(provider: AiProvider): Boolean = when (pro
     AiProvider.OPENROUTER -> hasOpenRouter
     AiProvider.ANTHROPIC -> hasAnthropic
     AiProvider.GEMINI -> hasGemini
+    AiProvider.OLLAMA -> ollamaEndpoint.isNotBlank() && ollamaModel.isNotBlank()
     AiProvider.ON_DEVICE -> true
 }
 
@@ -369,6 +406,7 @@ private fun AiProvider.displayName(): String = when (this) {
     AiProvider.OPENROUTER -> "OpenRouter"
     AiProvider.ANTHROPIC -> "Claude"
     AiProvider.GEMINI -> "Gemini"
+    AiProvider.OLLAMA -> "Local Ollama"
     AiProvider.ON_DEVICE -> "On device"
 }
 
@@ -377,6 +415,7 @@ private fun AiProvider.defaultModel(): String = when (this) {
     AiProvider.OPENROUTER -> "openrouter/auto"
     AiProvider.ANTHROPIC -> "claude-sonnet-4-5"
     AiProvider.GEMINI -> "gemini-3.1-flash-lite"
+    AiProvider.OLLAMA -> "deepseek-coder:6.7b"
     AiProvider.ON_DEVICE -> "Gemini Nano"
 }
 
@@ -385,6 +424,7 @@ private fun AiProvider.modelHint(): String = when (this) {
     AiProvider.OPENAI -> "Example: gpt-5-mini"
     AiProvider.ANTHROPIC -> "Example: claude-sonnet-4-5"
     AiProvider.GEMINI -> "Example: gemini-3.1-flash-lite"
+    AiProvider.OLLAMA -> "Use an installed Ollama model name; BYAK discovers available models when testing."
     AiProvider.ON_DEVICE -> "No cloud model or API key required."
 }
 
@@ -393,5 +433,14 @@ private fun SettingsUiState.modelFor(provider: AiProvider): String = when (provi
     AiProvider.OPENROUTER -> openRouterModel
     AiProvider.ANTHROPIC -> anthropicModel
     AiProvider.GEMINI -> geminiModel
+    AiProvider.OLLAMA -> ollamaModel
     AiProvider.ON_DEVICE -> "Gemini Nano"
+}
+
+private fun AiProvider.keyHelpUrl(): String? = when (this) {
+    AiProvider.OPENROUTER -> "https://openrouter.ai/settings/keys"
+    AiProvider.GEMINI -> "https://aistudio.google.com/app/apikey"
+    AiProvider.OPENAI -> "https://platform.openai.com/api-keys"
+    AiProvider.ANTHROPIC -> "https://console.anthropic.com/settings/keys"
+    AiProvider.OLLAMA, AiProvider.ON_DEVICE -> null
 }
