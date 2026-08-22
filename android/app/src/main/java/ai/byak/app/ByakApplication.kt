@@ -1,16 +1,18 @@
 package ai.byak.app
 
 import android.app.Application
-import ai.byak.app.data.ApiClient
-import ai.byak.app.data.SessionStore
+import androidx.hilt.work.HiltWorkerFactory
+import androidx.work.Configuration
+import dagger.hilt.android.HiltAndroidApp
+import javax.inject.Inject
 
-class ByakApplication : Application() {
-    lateinit var sessionStore: SessionStore
-    lateinit var api: ApiClient
-    override fun onCreate() {
-        super.onCreate()
-        sessionStore = SessionStore(this)
-        api = ApiClient(BuildConfig.API_BASE_URL, sessionStore)
-    }
+@HiltAndroidApp
+class ByakApplication : Application(), Configuration.Provider {
+    @Inject lateinit var workerFactory: HiltWorkerFactory
+
+    override val workManagerConfiguration: Configuration
+        get() = Configuration.Builder()
+            .setWorkerFactory(workerFactory)
+            .setMinimumLoggingLevel(if (BuildConfig.DEBUG) android.util.Log.DEBUG else android.util.Log.INFO)
+            .build()
 }
-

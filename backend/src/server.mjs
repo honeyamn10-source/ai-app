@@ -7,6 +7,7 @@ import { encryptSecret, hashPassword, maskSecret, sanitizeText, signToken, verif
 import { completeChat, listRemoteModels, providerCatalog, validateProvider } from './providers.mjs';
 import { buildRagContext, chunkText, retrieve } from './rag.mjs';
 import { githubSearch, readUrl, redditSearch, webSearch } from './research.mjs';
+import { verifyGoogleSubscription } from './billing.mjs';
 
 const store = await new Store().init();
 const attempts = new Map();
@@ -164,7 +165,33 @@ const handler = async (req, res) => {
     if (method === 'DELETE' && path === '/v1/memory') { store.remove('memories', x => x.userId === me.sub); return send(res, 200, { ok: true }); }
 
     if (method === 'GET' && path === '/v1/subscription') return send(res, 200, store.find('subscriptions', x => x.userId === me.sub && x.status === 'active') || { plan: 'free', status: 'active', entitlements: ['byok','basic_chat','basic_research','basic_exports'] });
-    if (method === 'POST' && path === '/v1/billing/google/verify') { const body = await jsonBody(req); requireText(body.purchaseToken, 'purchaseToken', 5000); throw Object.assign(new Error('Google Play server verification requires GOOGLE_PLAY_SERVICE_ACCOUNT_JSON and production package configuration'), { status: 501 }); }
+    if (method === 'POST' && (path === '/v1/billing/google/verify' || path === '/api/v1/billing/verify')) {
+      const body = await jsonBody(req);
+      const purchaseToken = requireText(body.purchaseToken, 'purchaseToken', 5000);
+      const productId = requireText(body.productId, 'productId', 100);
+      const verified = await verifyGoogleSubscription({ productId, purchaseToken });
+      const existing = store.find('subscriptions', item => item.purchaseTokenHash === verified.purchaseTokenHash);
+      if (existing && existing.userId !== me.sub) throw Object.assign(new Error('Purchase is already linked to another account'), { status: 409 });
+      const values = {
+        userId: me.sub,
+        plan: productId === 'byak_annual_10' ? 'annual' : 'monthly',
+        productId,
+        purchaseTokenHash: verified.purchaseTokenHash,
+        status: verified.active ? 'active' : 'inactive',
+        expiresAt: verified.expiresAtEpochMillis ? new Date(verified.expiresAtEpochMillis).toISOString() : null,
+        latestOrderId: verified.latestOrderId,
+        regionCode: verified.regionCode,
+        testPurchase: verified.testPurchase,
+      };
+      if (existing) store.update('subscriptions', existing.id, values); else store.insert('subscriptions', values);
+      store.audit(me.sub, 'billing.google_verified', { productId, active: verified.active, testPurchase: verified.testPurchase });
+      return send(res, 200, {
+        verified: verified.verified,
+        active: verified.active,
+        productId,
+        expiresAtEpochMillis: verified.expiresAtEpochMillis,
+      });
+    }
 
     if (method === 'GET' && path === '/v1/admin/health') { if (me.role !== 'admin') throw Object.assign(new Error('Forbidden'), { status: 403 }); return send(res, 200, { users: store.data.users.length, conversations: store.data.conversations.length, files: store.data.files.length, auditEvents: store.data.audit.length }); }
 
@@ -184,4 +211,3 @@ const handler = async (req, res) => {
 
 export const server = createServer(handler);
 if (process.argv[1] === new URL(import.meta.url).pathname) server.listen(config.port, '0.0.0.0', () => console.log(JSON.stringify({ level: 'info', service: 'byak-api', port: config.port })));
-

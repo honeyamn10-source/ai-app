@@ -10,3 +10,4 @@ android/**/build/
 *.keystore
 .idea/
 .DS_Store
+
