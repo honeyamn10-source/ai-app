@@ -53,7 +53,9 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import ai.byak.app.ui.components.ByakLogo
 import ai.byak.app.ui.theme.GlassCard
+import ai.byak.app.ui.theme.CyberTeal
 import ai.byak.app.ui.theme.NeonPurple
+import ai.byak.app.ui.theme.QuantumBlue
 
 @Composable
 fun AuthScreen(viewModel: AuthViewModel) {
@@ -72,7 +74,9 @@ fun AuthScreen(viewModel: AuthViewModel) {
     Scaffold(snackbarHost = { SnackbarHost(snackbar) }, containerColor = Color.Transparent) { padding ->
         Box(
             Modifier.fillMaxSize().background(
-                Brush.verticalGradient(listOf(Color(0xFF17101F), Color(0xFF0B0C10), Color(0xFF071014))),
+                Brush.verticalGradient(
+                    listOf(Color(0xFF160C27), Color(0xFF05060A), Color(0xFF061519)),
+                ),
             ).padding(padding).statusBarsPadding().navigationBarsPadding(),
         ) {
             Column(
@@ -83,12 +87,23 @@ fun AuthScreen(viewModel: AuthViewModel) {
                 ByakLogo(104.dp)
                 Text("BYAK AI", fontSize = 31.sp, fontWeight = FontWeight.Black, letterSpacing = 2.sp)
                 Text(
-                    "A calm place to think, build, and get things done.",
+                    "Intelligence beyond the cloud.",
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     textAlign = TextAlign.Center,
                     fontSize = 17.sp,
                 )
                 Spacer(Modifier.height(30.dp))
+
+                Row(
+                    Modifier.fillMaxWidth().padding(bottom = 14.dp),
+                    horizontalArrangement = Arrangement.Center,
+                ) {
+                    Text("PHONE-NATIVE", color = CyberTeal, fontSize = 10.sp, letterSpacing = 1.4.sp)
+                    Text("  ·  ", color = QuantumBlue, fontSize = 10.sp)
+                    Text("ENCRYPTED", color = NeonPurple, fontSize = 10.sp, letterSpacing = 1.4.sp)
+                    Text("  ·  ", color = QuantumBlue, fontSize = 10.sp)
+                    Text("AUTONOMOUS", color = CyberTeal, fontSize = 10.sp, letterSpacing = 1.4.sp)
+                }
 
                 GlassCard(Modifier.fillMaxWidth()) {
                     Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {

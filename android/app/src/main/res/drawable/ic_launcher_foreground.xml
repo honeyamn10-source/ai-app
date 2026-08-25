@@ -1,36 +1,20 @@
 <?xml version="1.0" encoding="utf-8"?>
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
     android:width="108dp"
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
-    <!-- Restrained B∞ monogram. All geometry remains inside the adaptive-icon safe zone. -->
-    <path
-        android:fillColor="@android:color/transparent"
-        android:pathData="M34,29L34,79"
-        android:strokeColor="#F4F0FA"
-        android:strokeLineCap="round"
-        android:strokeWidth="5.5" />
-    <path
-        android:fillColor="@android:color/transparent"
-        android:pathData="M35,32H54C67,32 72,39 72,46C72,53 65,57 54,57H35"
-        android:strokeColor="#A66BFF"
-        android:strokeLineCap="round"
-        android:strokeLineJoin="round"
-        android:strokeWidth="6" />
-    <path
-        android:fillColor="@android:color/transparent"
-        android:pathData="M35,55H56C71,55 77,62 77,69C77,76 70,79 56,79H35"
-        android:strokeColor="#29D8E6"
-        android:strokeLineCap="round"
-        android:strokeLineJoin="round"
-        android:strokeWidth="6" />
-    <path
-        android:fillColor="@android:color/transparent"
-        android:pathData="M46,55C53,46 60,45 67,54C74,63 81,62 85,54C81,46 74,45 67,54C60,63 53,64 46,55Z"
-        android:strokeColor="#DCC6FF"
-        android:strokeLineCap="round"
-        android:strokeLineJoin="round"
-        android:strokeWidth="2.4" />
-    <path android:fillColor="#F4C95D" android:pathData="M66,51L70,55L66,59L62,55Z" />
+    <!-- Spectral intelligence sigil. Geometry remains inside the adaptive-icon safe zone. -->
+    <path android:fillColor="@android:color/transparent" android:pathData="M16,54C24,25 84,25 92,54C84,83 24,83 16,54Z" android:strokeColor="#334360" android:strokeWidth="1.4" />
+    <path android:fillColor="@android:color/transparent" android:pathData="M54,18L88,54L54,90L20,54Z" android:strokeColor="#8052A0" android:strokeLineJoin="round" android:strokeWidth="1.6" />
+    <path android:fillColor="@android:color/transparent" android:pathData="M25,54C33,38 44,38 54,54C64,70 75,70 83,54C75,38 64,38 54,54C44,70 33,70 25,54" android:strokeLineCap="round" android:strokeLineJoin="round" android:strokeWidth="6">
+        <aapt:attr name="android:strokeColor">
+            <gradient android:endColor="#58F6FF" android:endX="83" android:endY="70" android:startColor="#C266FF" android:startX="25" android:startY="38" android:type="linear" />
+        </aapt:attr>
+    </path>
+    <path android:fillColor="#58F6FF" android:pathData="M18,50L22,54L18,58L14,54Z" />
+    <path android:fillColor="#C266FF" android:pathData="M90,50L94,54L90,58L86,54Z" />
+    <path android:fillColor="#FFCF66" android:pathData="M54,45L63,54L54,63L45,54Z" />
+    <path android:fillColor="#F6F7FF" android:pathData="M54,50L58,54L54,58L50,54Z" />
 </vector>

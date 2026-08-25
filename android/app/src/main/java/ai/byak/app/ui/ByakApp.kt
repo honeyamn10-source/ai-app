@@ -11,6 +11,7 @@ import androidx.compose.material.icons.outlined.PersonOutline
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
+import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
@@ -19,6 +20,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavGraph.Companion.findStartDestination
@@ -38,6 +40,9 @@ import ai.byak.app.ui.image.ImageStudioScreen
 import ai.byak.app.ui.image.ImageStudioViewModel
 import ai.byak.app.ui.settings.SettingsScreen
 import ai.byak.app.ui.settings.SettingsViewModel
+import ai.byak.app.ui.theme.CyberTeal
+import ai.byak.app.ui.theme.NeonPurple
+import ai.byak.app.ui.theme.ObsidianElevated
 
 private enum class MainDestination(val route: String, val label: String, val icon: ImageVector) {
     Chat("chat", "Chat", Icons.Outlined.ChatBubbleOutline),
@@ -72,13 +77,20 @@ private fun AuthenticatedApp() {
         containerColor = MaterialTheme.colorScheme.background,
         bottomBar = {
             if (route != "library") {
-                NavigationBar(containerColor = MaterialTheme.colorScheme.surface) {
+                NavigationBar(containerColor = ObsidianElevated, tonalElevation = 0.dp) {
                     MainDestination.entries.forEach { destination ->
                         NavigationBarItem(
                             selected = route == destination.route,
                             onClick = { navigate(destination) },
                             icon = { androidx.compose.material3.Icon(destination.icon, destination.label) },
                             label = { Text(destination.label) },
+                            colors = NavigationBarItemDefaults.colors(
+                                selectedIconColor = CyberTeal,
+                                selectedTextColor = MaterialTheme.colorScheme.onSurface,
+                                indicatorColor = NeonPurple.copy(alpha = 0.2f),
+                                unselectedIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                                unselectedTextColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                            ),
                         )
                     }
                 }
