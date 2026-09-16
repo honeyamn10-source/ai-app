@@ -1,8 +1,24 @@
-# BYAK AI
+<p align="center"><img src="docs/assets/readme-cover.svg" alt="BYAK AI — One Android workspace for conversations and research." width="100%"></p>
 
-**Bring Your API Key. Bring Your Intelligence.**
+<h1 align="center">BYAK AI</h1>
+<p align="center"><strong>One Android workspace for conversations and research.</strong></p>
+<p align="center"><a href="#project-at-a-glance">Overview</a> · <a href="#start-here">Start here</a> · <a href="#project-guide">Project guide</a> · <a href="https://github.com/honeyamn10-source/ai-app/issues">Issues</a></p>
 
-BYAK AI is a commercial-grade foundation for a multi-provider Android AI assistant. This repository contains a runnable zero-dependency reference API, a PostgreSQL/pgvector production schema, and a native Kotlin/Jetpack Compose client.
+[![CI](https://github.com/honeyamn10-source/ai-app/actions/workflows/ci.yml/badge.svg)](https://github.com/honeyamn10-source/ai-app/actions/workflows/ci.yml)
+
+Kotlin/Compose client with a multi-provider reference API.
+
+## Project at a glance
+
+| Current scope | Release boundary |
+| --- | --- |
+| **Source foundation** | The inspected Android CI run fails to compile; store release remains blocked. |
+
+## Start here
+
+The reference API requires Node.js 22+. Android requires JDK 17 and Android SDK 35. The inspected Android build failed on a Kotlin/Billing compatibility mismatch; resolve that before claiming an installable release.
+
+## Project guide
 
 ## What works
 
@@ -94,4 +110,3 @@ BYOK provider charges remain between users and their selected provider. Never re
 ## License
 
 The original BYAK AI code in this repository is proprietary unless the owner selects another license. Third-party dependencies retain their own licenses; see `THIRD_PARTY_NOTICES.md`.
-
