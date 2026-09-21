@@ -147,6 +147,7 @@ class SecureStore @Inject constructor(
                 selectedModel = cleanModel,
                 customModel = cleanModel,
             )
+            "PORTABLE_LOCAL" -> it.copy(selectedProvider = selected, selectedModel = PORTABLE_LOCAL_MODEL)
             "ON_DEVICE" -> it.copy(selectedProvider = selected, selectedModel = ON_DEVICE_MODEL)
             else -> error("Unsupported AI provider: $provider")
         }
@@ -175,7 +176,7 @@ class SecureStore @Inject constructor(
             "MISTRAL" -> state.mistralKey
             "DEEPSEEK" -> state.deepSeekKey
             "CUSTOM" -> state.customKey
-            "AUTO", "ON_DEVICE" -> ON_DEVICE_READY_SENTINEL
+            "AUTO", "PORTABLE_LOCAL", "ON_DEVICE" -> ON_DEVICE_READY_SENTINEL
             else -> ""
         }
     }
@@ -192,6 +193,7 @@ class SecureStore @Inject constructor(
             "DEEPSEEK" -> state.deepSeekModel
             "CUSTOM" -> state.customModel
             "AUTO" -> AUTO_MODEL
+            "PORTABLE_LOCAL" -> PORTABLE_LOCAL_MODEL
             "ON_DEVICE" -> ON_DEVICE_MODEL
             else -> state.selectedModel
         }
@@ -207,7 +209,7 @@ class SecureStore @Inject constructor(
         AiProvider.MISTRAL -> "https://api.mistral.ai/v1"
         AiProvider.DEEPSEEK -> "https://api.deepseek.com/v1"
         AiProvider.CUSTOM -> snapshot().customBaseUrl
-        AiProvider.AUTO, AiProvider.ON_DEVICE -> ""
+        AiProvider.AUTO, AiProvider.PORTABLE_LOCAL, AiProvider.ON_DEVICE -> ""
     }
 
     fun configuredCloudProvider(): ProviderSelection? = snapshot().let { state ->
@@ -231,6 +233,7 @@ class SecureStore @Inject constructor(
 
     companion object {
         const val AUTO_MODEL = "Best available"
+        const val PORTABLE_LOCAL_MODEL = "Qwen3 0.6B Local"
         const val ON_DEVICE_MODEL = "Gemini Nano"
         private const val ON_DEVICE_READY_SENTINEL = "device"
     }
