@@ -57,7 +57,7 @@ class ChatRepositoryImpl @Inject constructor(
         val cleanPrompt = prompt.trim()
         require(cleanPrompt.isNotEmpty()) { "Message cannot be empty" }
         val state = secureStore.snapshot()
-        val provider = runCatching { AiProvider.valueOf(state.selectedProvider) }.getOrDefault(AiProvider.ON_DEVICE)
+        val provider = runCatching { AiProvider.valueOf(state.selectedProvider) }.getOrDefault(AiProvider.AUTO)
         val now = System.currentTimeMillis()
         val userId = UUID.randomUUID().toString()
         val assistantId = UUID.randomUUID().toString()
