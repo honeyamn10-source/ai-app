@@ -1,6 +1,9 @@
 package ai.byak.app.data.repository
 
+import ai.byak.app.data.localai.OnDeviceAvailability
 import ai.byak.app.data.localai.OnDeviceModelManager
+import ai.byak.app.data.security.SecureStore
+import ai.byak.app.data.security.normalizeCompatibleBaseUrl
 import ai.byak.app.data.security.normalizeCredential
 import ai.byak.app.domain.model.AiProvider
 import io.ktor.client.HttpClient
@@ -31,6 +34,7 @@ data class ProviderConnectionReport(
     val availableModels: List<String>,
     val message: String,
     val normalizedCredential: String = "",
+    val normalizedBaseUrl: String = "",
 )
 
 @Singleton
@@ -38,72 +42,128 @@ class ProviderConnectionTester @Inject constructor(
     private val client: HttpClient,
     private val json: Json,
     private val onDevice: OnDeviceModelManager,
+    private val secureStore: SecureStore,
 ) {
     suspend fun test(
         provider: AiProvider,
         apiKey: String,
         model: String,
-    ): Result<ProviderConnectionReport> =
-        runCatching {
-            if (provider == AiProvider.ON_DEVICE) {
+        baseUrl: String = "",
+    ): Result<ProviderConnectionReport> = runCatching {
+        when (provider) {
+            AiProvider.AUTO -> testAuto()
+            AiProvider.ON_DEVICE -> {
                 val prepared = onDevice.prepare()
-                return@runCatching ProviderConnectionReport(
+                ProviderConnectionReport(
                     provider = provider,
                     resolvedModel = prepared.modelName,
                     availableModels = listOf(prepared.modelName),
                     message = prepared.message,
                 )
             }
-
-            val normalized = normalizeCredential(provider, apiKey)
-            val key = normalized.value
-            require(key.isNotBlank()) { "Enter an API key first." }
-            val report = when (provider) {
-                AiProvider.OPENROUTER -> testOpenRouter(key, model)
-                AiProvider.GEMINI -> testGemini(key, model)
-                AiProvider.OPENAI -> testOpenAi(key, model)
-                AiProvider.ANTHROPIC -> testAnthropic(key, model)
-                AiProvider.ON_DEVICE -> error("Handled above")
+            else -> {
+                val normalized = normalizeCredential(provider, apiKey)
+                val key = normalized.value
+                require(key.isNotBlank()) { "Enter an API key first." }
+                val report = when (provider) {
+                    AiProvider.OPENROUTER -> testCompatible(
+                        provider, key, model, secureStore.baseUrl(provider),
+                        listOf("openrouter/auto"),
+                        aliases = setOf("openrouter/auto"),
+                    )
+                    AiProvider.GEMINI -> testGemini(key, model)
+                    AiProvider.OPENAI -> testCompatible(
+                        provider, key, model, secureStore.baseUrl(provider),
+                        listOf("gpt-5-mini", "gpt-4.1-mini"),
+                    )
+                    AiProvider.ANTHROPIC -> testAnthropic(key, model)
+                    AiProvider.NVIDIA -> testCompatible(
+                        provider, key, model, secureStore.baseUrl(provider),
+                        listOf("meta/llama-3.1-70b-instruct"),
+                    )
+                    AiProvider.GROQ -> testCompatible(
+                        provider, key, model, secureStore.baseUrl(provider),
+                        listOf("llama-3.3-70b-versatile", "llama-3.1-8b-instant"),
+                    )
+                    AiProvider.MISTRAL -> testCompatible(
+                        provider, key, model, secureStore.baseUrl(provider),
+                        listOf("mistral-small-latest", "mistral-medium-latest"),
+                    )
+                    AiProvider.DEEPSEEK -> testCompatible(
+                        provider, key, model, secureStore.baseUrl(provider),
+                        listOf("deepseek-chat", "deepseek-reasoner"),
+                    )
+                    AiProvider.CUSTOM -> {
+                        val cleanBase = normalizeCompatibleBaseUrl(baseUrl)
+                        testCompatible(provider, key, model, cleanBase, emptyList())
+                            .copy(normalizedBaseUrl = cleanBase)
+                    }
+                    AiProvider.AUTO, AiProvider.ON_DEVICE -> error("Handled above")
+                }
+                report.copy(
+                    normalizedCredential = key,
+                    message = report.message + if (normalized.repaired) {
+                        " BYAK safely extracted the key value from the text you pasted."
+                    } else "",
+                )
             }
-            report.copy(
-                normalizedCredential = key,
-                message = report.message + if (normalized.repaired) {
-                    " BYAK safely extracted the key value from the text you pasted."
-                } else "",
-            )
         }
+    }
 
-    private suspend fun testOpenRouter(key: String, requestedModel: String): ProviderConnectionReport {
-        val catalogBody = requireSuccess(
-            AiProvider.OPENROUTER,
-            client.get("https://openrouter.ai/api/v1/models?output_modalities=text&limit=1000") {
-                header(HttpHeaders.Authorization, "Bearer $key")
-            },
-        )
-        val models = parseDataModels(catalogBody)
-        val resolved = resolveModel(
-            requested = requestedModel,
-            available = models,
-            aliases = setOf("openrouter/auto"),
-            preferred = listOf("openrouter/auto"),
-        )
-        val probe = client.post("https://openrouter.ai/api/v1/chat/completions") {
-            header(HttpHeaders.Authorization, "Bearer $key")
-            header("HTTP-Referer", "https://byak.ai")
-            header("X-OpenRouter-Title", "BYAK AI")
-            contentType(ContentType.Application.Json)
-            setBody(openAiProbeBody(resolved, "max_tokens"))
+    private suspend fun testAuto(): ProviderConnectionReport {
+        val localStatus = runCatching { onDevice.status() }.getOrDefault(OnDeviceAvailability.UNSUPPORTED)
+        val cloud = secureStore.configuredCloudProvider()
+        val message = when {
+            localStatus == OnDeviceAvailability.AVAILABLE ->
+                "Auto is ready. BYAK will use private Phone AI first and cloud only when you explicitly select it."
+            cloud != null ->
+                "Auto is ready. Phone AI is unavailable on this device, so BYAK will use ${cloud.provider.displayName()}."
+            else ->
+                "Auto is selected. This phone does not currently support Phone AI; connect any cloud provider below and BYAK will use it automatically."
         }
-        val probeBody = probe.bodyAsText()
+        return ProviderConnectionReport(
+            provider = AiProvider.AUTO,
+            resolvedModel = SecureStore.AUTO_MODEL,
+            availableModels = emptyList(),
+            message = message,
+        )
+    }
+
+    private suspend fun testCompatible(
+        provider: AiProvider,
+        key: String,
+        requestedModel: String,
+        baseUrl: String,
+        preferred: List<String>,
+        aliases: Set<String> = emptySet(),
+    ): ProviderConnectionReport {
+        val cleanBase = baseUrl.trimEnd('/')
+        val catalog = client.get("$cleanBase/models") {
+            header(HttpHeaders.Authorization, "Bearer $key")
+        }
+        val models = when {
+            catalog.status.isSuccess() -> parseDataModels(catalog.bodyAsText().take(MAX_BODY))
+            catalog.status.value == 404 && requestedModel.isNotBlank() -> emptyList()
+            else -> error(providerFailure(provider, catalog.status.value, catalog.bodyAsText().take(MAX_BODY)))
+        }
+        val resolved = resolveModel(requestedModel, models, aliases, preferred)
+        val probe = client.post("$cleanBase/chat/completions") {
+            header(HttpHeaders.Authorization, "Bearer $key")
+            if (provider == AiProvider.OPENROUTER) {
+                header("HTTP-Referer", "https://byak.site.je")
+                header("X-OpenRouter-Title", "BYAK AI")
+            }
+            contentType(ContentType.Application.Json)
+            setBody(openAiProbeBody(resolved))
+        }
+        val probeBody = probe.bodyAsText().take(MAX_BODY)
         if (!probe.status.isSuccess() && probe.status.value != 429) {
-            error(providerFailure(AiProvider.OPENROUTER, probe.status.value, probeBody))
+            error(providerFailure(provider, probe.status.value, probeBody))
         }
         val note = if (probe.status.value == 429) {
             " The key is valid; generation is temporarily rate-limited."
-        } else {
-            ""
-        }
-        return report(AiProvider.OPENROUTER, requestedModel, resolved, models, note)
+        } else ""
+        return report(provider, requestedModel, resolved, models, note)
     }
 
     private suspend fun testGemini(key: String, requestedModel: String): ProviderConnectionReport {
@@ -118,7 +178,6 @@ class ProviderConnectionTester @Inject constructor(
             requested = requestedModel,
             available = models,
             preferred = listOf(
-                "gemini-3.1-flash-lite",
                 "gemini-2.5-flash-lite",
                 "gemini-2.5-flash",
             ),
@@ -135,35 +194,17 @@ class ProviderConnectionTester @Inject constructor(
                         put("parts", buildJsonArray { add(buildJsonObject { put("text", "Reply OK") }) })
                     })
                 })
-                put("generationConfig", buildJsonObject { put("maxOutputTokens", 8) })
+                put("generationConfig", buildJsonObject { put("maxOutputTokens", 32) })
             })
         }
-        val probeBody = probe.bodyAsText()
+        val probeBody = probe.bodyAsText().take(MAX_BODY)
         if (!probe.status.isSuccess() && probe.status.value != 429) {
             error(providerFailure(AiProvider.GEMINI, probe.status.value, probeBody))
         }
         val note = if (probe.status.value == 429) {
             " The key is valid; its Gemini quota is temporarily exhausted."
-        } else {
-            ""
-        }
+        } else ""
         return report(AiProvider.GEMINI, requestedModel, resolved, models, note)
-    }
-
-    private suspend fun testOpenAi(key: String, requestedModel: String): ProviderConnectionReport {
-        val catalogBody = requireSuccess(
-            AiProvider.OPENAI,
-            client.get("https://api.openai.com/v1/models") {
-                header(HttpHeaders.Authorization, "Bearer $key")
-            },
-        )
-        val models = parseDataModels(catalogBody)
-        val resolved = resolveModel(
-            requested = requestedModel,
-            available = models,
-            preferred = listOf("gpt-5-mini", "gpt-4.1-mini"),
-        )
-        return report(AiProvider.OPENAI, requestedModel, resolved, models)
     }
 
     private suspend fun testAnthropic(key: String, requestedModel: String): ProviderConnectionReport {
@@ -185,9 +226,7 @@ class ProviderConnectionTester @Inject constructor(
 
     private suspend fun requireSuccess(provider: AiProvider, response: HttpResponse): String {
         val body = response.bodyAsText().take(MAX_BODY)
-        if (!response.status.isSuccess()) {
-            error(providerFailure(provider, response.status.value, body))
-        }
+        if (!response.status.isSuccess()) error(providerFailure(provider, response.status.value, body))
         return body
     }
 
@@ -198,7 +237,8 @@ class ProviderConnectionTester @Inject constructor(
         models: List<String>,
         note: String = "",
     ): ProviderConnectionReport {
-        val changed = requested.trim().isNotBlank() && requested.trim() != resolved
+        val changed = requested.trim().removePrefix("models/").isNotBlank() &&
+            requested.trim().removePrefix("models/") != resolved
         val selection = if (changed) {
             " The requested model is unavailable, so BYAK selected $resolved."
         } else {
@@ -207,7 +247,7 @@ class ProviderConnectionTester @Inject constructor(
         return ProviderConnectionReport(
             provider = provider,
             resolvedModel = resolved,
-            availableModels = models.take(100),
+            availableModels = models.take(MAX_MODELS),
             message = provider.displayName() + " is connected." + selection + note,
         )
     }
@@ -240,13 +280,14 @@ class ProviderConnectionTester @Inject constructor(
         if (clean in aliases || clean in available) return clean
         return preferred.firstOrNull { it in aliases || it in available }
             ?: available.firstOrNull()
+            ?: preferred.firstOrNull()
             ?: clean.takeIf(String::isNotBlank)
-            ?: error("This provider returned no compatible text-generation models.")
+            ?: error("Enter a model ID or use a provider that exposes a model catalog.")
     }
 
-    private fun openAiProbeBody(model: String, tokenField: String): JsonObject = buildJsonObject {
+    private fun openAiProbeBody(model: String): JsonObject = buildJsonObject {
         put("model", model)
-        put(tokenField, 8)
+        put("max_tokens", 16)
         put("messages", buildJsonArray {
             add(buildJsonObject {
                 put("role", "user")
@@ -257,6 +298,7 @@ class ProviderConnectionTester @Inject constructor(
 
     private companion object {
         const val MAX_BODY = 1_000_000
+        const val MAX_MODELS = 250
     }
 }
 
