@@ -29,14 +29,14 @@ data class SettingsUiState(
     val session: Session? = null,
     val provider: AiProvider = AiProvider.AUTO,
     val model: String = SecureStore.AUTO_MODEL,
-    val openAiModel: String = "gpt-5-mini",
+    val openAiModel: String = "gpt-5.6-luna",
     val openRouterModel: String = "openrouter/auto",
-    val anthropicModel: String = "claude-sonnet-4-5",
-    val geminiModel: String = "gemini-2.5-flash-lite",
+    val anthropicModel: String = "claude-sonnet-5",
+    val geminiModel: String = "gemini-3.8-flash",
     val nvidiaModel: String = "meta/llama-3.1-70b-instruct",
     val groqModel: String = "llama-3.3-70b-versatile",
     val mistralModel: String = "mistral-small-latest",
-    val deepSeekModel: String = "deepseek-chat",
+    val deepSeekModel: String = "deepseek-v4-flash",
     val customModel: String = "",
     val customBaseUrl: String = "",
     val hasOpenAi: Boolean = false,
@@ -75,7 +75,8 @@ class SettingsViewModel @Inject constructor(
     private val portableLocal: PortableLocalModelManager,
 ) : ViewModel() {
     private val connection = MutableStateFlow(ConnectionUiState())
-    private val portable = MutableStateFlow(portableLocal.state())
+    private val portable = portableLocal.observeState()
+        .stateIn(viewModelScope, SharingStarted.Eagerly, portableLocal.state())
 
     val state: StateFlow<SettingsUiState> = combine(
         secureStore.state,
@@ -142,7 +143,6 @@ class SettingsViewModel @Inject constructor(
                         model = report.resolvedModel,
                         baseUrl = report.normalizedBaseUrl.ifBlank { baseUrl },
                     )
-                    portable.value = portableLocal.state()
                     connection.value = ConnectionUiState(
                         message = report.message,
                         succeeded = true,
@@ -150,17 +150,12 @@ class SettingsViewModel @Inject constructor(
                     )
                 }
                 .onFailure { error ->
-                    portable.value = portableLocal.state()
                     connection.value = ConnectionUiState(
                         message = error.message ?: "Connection test failed. Check the key and try again.",
                         succeeded = false,
                     )
                 }
         }
-    }
-
-    fun refreshPortableModel() {
-        portable.value = portableLocal.state()
     }
 
     fun clearConnectionMessage() = connection.update { ConnectionUiState() }
