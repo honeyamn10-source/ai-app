@@ -130,7 +130,8 @@ dependencies {
 
     implementation("androidx.work:work-runtime-ktx:2.11.0")
     implementation("com.android.billingclient:billing-ktx:9.1.0")
-    implementation("com.google.mlkit:genai-prompt:1.0.0-beta2")\n    implementation("com.google.ai.edge.litertlm:litertlm-android:0.11.0")
+    implementation("com.google.mlkit:genai-prompt:1.0.0-beta2")
+    implementation("com.google.ai.edge.litertlm:litertlm-android:0.11.0")
 
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.11.0")
