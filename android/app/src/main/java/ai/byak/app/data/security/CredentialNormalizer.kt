@@ -61,7 +61,7 @@ private fun AiProvider.tokenPattern(): Regex? = when (this) {
     AiProvider.NVIDIA -> Regex("""nvapi-[A-Za-z0-9_-]{16,}""")
     AiProvider.GROQ -> Regex("""gsk_[A-Za-z0-9_-]{16,}""")
     AiProvider.DEEPSEEK -> Regex("""sk-[A-Za-z0-9_-]{16,}""")
-    AiProvider.MISTRAL, AiProvider.CUSTOM, AiProvider.AUTO, AiProvider.ON_DEVICE -> null
+    AiProvider.MISTRAL, AiProvider.CUSTOM, AiProvider.AUTO, AiProvider.PORTABLE_LOCAL, AiProvider.ON_DEVICE -> null
 }
 
 private val ASSIGNMENT_PATTERN = Regex(
