@@ -10,10 +10,17 @@ internal fun providerFailure(provider: AiProvider, status: Int, body: String): S
     val detail = providerMessage(body)
     val name = provider.displayName()
     return when (status) {
-        400 -> name + " could not use this request or model" + detail.suffix() + "."
+        400 -> when {
+            provider == AiProvider.GEMINI && (
+                detail.contains("API key", ignoreCase = true) ||
+                    detail.contains("API_KEY_INVALID", ignoreCase = true)
+                ) -> "Gemini could not validate this API key. Create a key in Google AI Studio, enable the Generative Language API, and remove incompatible Android-app restrictions" + detail.suffix() + "."
+            else -> name + " could not use this request or model" + detail.suffix() + "."
+        }
         401 -> when (provider) {
             AiProvider.OPENROUTER -> "OpenRouter rejected this key (HTTP 401). Create a fresh key in OpenRouter Settings and paste only the sk-or-v1 value" + detail.suffix() + "."
-            AiProvider.GEMINI -> "Gemini rejected this key (HTTP 401). Old, leaked, dormant, or incorrectly restricted keys can be blocked; create a new Gemini API key in Google AI Studio" + detail.suffix() + "."
+            AiProvider.GEMINI -> "Gemini rejected this key (HTTP 401). Create a new key in Google AI Studio and make sure the Generative Language API is allowed" + detail.suffix() + "."
+            AiProvider.NVIDIA -> "NVIDIA rejected this key (HTTP 401). Paste the nvapi key created in the NVIDIA API Catalog" + detail.suffix() + "."
             else -> name + " rejected this credential (HTTP 401). It may be missing, invalid, expired, or revoked" + detail.suffix() + "."
         }
         402 -> name + " accepted the key, but this account or key has no available credits" + detail.suffix() + "."
@@ -51,6 +58,12 @@ internal fun AiProvider.displayName(): String = when (this) {
     AiProvider.OPENROUTER -> "OpenRouter"
     AiProvider.ANTHROPIC -> "Anthropic"
     AiProvider.GEMINI -> "Gemini"
+    AiProvider.NVIDIA -> "NVIDIA"
+    AiProvider.GROQ -> "Groq"
+    AiProvider.MISTRAL -> "Mistral"
+    AiProvider.DEEPSEEK -> "DeepSeek"
+    AiProvider.CUSTOM -> "Universal API"
+    AiProvider.AUTO -> "Auto"
     AiProvider.ON_DEVICE -> "Gemini Nano"
 }
 
