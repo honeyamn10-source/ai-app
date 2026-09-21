@@ -243,25 +243,35 @@ private fun PlanRow(plan: PlanOffer, available: Boolean, active: Boolean, purcha
 private fun ProviderDialog(
     state: SettingsUiState,
     dismiss: () -> Unit,
-    save: (AiProvider, String, String) -> Unit,
+    save: (AiProvider, String, String, String) -> Unit,
 ) {
     var provider by remember { mutableStateOf(state.provider) }
     var key by remember { mutableStateOf("") }
     var model by remember(provider) { mutableStateOf(state.modelFor(provider)) }
+    var baseUrl by remember(provider) { mutableStateOf(state.baseUrlFor(provider)) }
     val uriHandler = LocalUriHandler.current
-    val needsKey = provider != AiProvider.ON_DEVICE
+    val needsKey = provider !in setOf(AiProvider.AUTO, AiProvider.PORTABLE_LOCAL, AiProvider.ON_DEVICE)
+    val needsModel = needsKey
     val hasExisting = needsKey && state.hasKeyFor(provider)
     AlertDialog(
         onDismissRequest = { if (!state.testingConnection) dismiss() },
         icon = { Icon(Icons.Outlined.Key, null) },
-        title = { Text("Connect your AI") },
+        title = { Text("Choose your AI") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Text("Phone AI works without a key. Cloud providers are optional and are tested through the same generation route used by Chat before saving.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(
+                    "Auto uses private local AI when available and otherwise uses your first connected cloud provider. You can also choose any provider directly.",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
                 LazyRow(horizontalArrangement = Arrangement.spacedBy(7.dp)) {
                     items(AiProvider.entries, key = { it.name }) { item ->
                         AssistChip(
-                            onClick = { provider = item; model = item.defaultModel(); key = "" },
+                            onClick = {
+                                provider = item
+                                model = state.modelFor(item).ifBlank { item.defaultModel() }
+                                baseUrl = state.baseUrlFor(item)
+                                key = ""
+                            },
                             label = { Text(item.displayName()) },
                             leadingIcon = if (provider == item) ({
                                 Icon(Icons.Outlined.CheckCircle, null, Modifier.size(17.dp))
@@ -269,31 +279,74 @@ private fun ProviderDialog(
                         )
                     }
                 }
+                AnimatedVisibility(provider == AiProvider.AUTO) {
+                    Text(
+                        "Recommended. BYAK automatically skips unsupported AICore hardware and uses Portable Local AI or an encrypted cloud connection.",
+                        color = CyberTeal,
+                        fontSize = 12.sp,
+                    )
+                }
+                AnimatedVisibility(provider == AiProvider.PORTABLE_LOCAL) {
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text(
+                            state.portableMessage.ifBlank {
+                                "Download Qwen3 0.6B once, then chat privately without internet or an API key."
+                            },
+                            color = if (state.portableStatus == ai.byak.app.data.localai.PortableModelStatus.READY) {
+                                CyberTeal
+                            } else {
+                                MaterialTheme.colorScheme.onSurfaceVariant
+                            },
+                            fontSize = 12.sp,
+                        )
+                        if (state.portableStatus == ai.byak.app.data.localai.PortableModelStatus.DOWNLOADING) {
+                            Text(
+                                "Download progress: ${state.portableProgress}%. Tap Check status after Android finishes.",
+                                color = PremiumGold,
+                                fontSize = 12.sp,
+                            )
+                        }
+                    }
+                }
                 AnimatedVisibility(provider == AiProvider.ON_DEVICE) {
                     Text(
-                        "Runs privately with Gemini Nano through Android AICore. BYAK prepares it automatically on first use; no laptop, separate server, or API key is needed.",
+                        "Gemini Nano uses Android AICore and appears as Ready or Downloadable only on supported chipsets. Auto skips it when unsupported.",
                         color = CyberTeal,
                         fontSize = 12.sp,
                     )
                 }
                 AnimatedVisibility(hasExisting) {
-                    Text("A key is already stored. Leave this blank to test and keep it.", color = CyberTeal, fontSize = 12.sp)
+                    Text(
+                        "A key is already encrypted on this phone. Leave the key blank to keep and retest it.",
+                        color = CyberTeal,
+                        fontSize = 12.sp,
+                    )
+                }
+                AnimatedVisibility(provider == AiProvider.CUSTOM) {
+                    OutlinedTextField(
+                        value = baseUrl,
+                        onValueChange = { baseUrl = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        label = { Text("HTTPS API base URL") },
+                        supportingText = { Text("Example: https://example.com/v1") },
+                        singleLine = true,
+                        enabled = !state.testingConnection,
+                        shape = RoundedCornerShape(16.dp),
+                    )
                 }
                 AnimatedVisibility(needsKey) {
-                    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                        OutlinedTextField(
-                            value = key,
-                            onValueChange = { key = it },
-                            modifier = Modifier.fillMaxWidth(),
-                            label = { Text(if (hasExisting) "Replace API key (optional)" else "API key") },
-                            visualTransformation = PasswordVisualTransformation(),
-                            singleLine = true,
-                            enabled = !state.testingConnection,
-                            shape = RoundedCornerShape(16.dp),
-                        )
-                    }
+                    OutlinedTextField(
+                        value = key,
+                        onValueChange = { key = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        label = { Text(if (hasExisting) "Replace API key (optional)" else "API key") },
+                        visualTransformation = PasswordVisualTransformation(),
+                        singleLine = true,
+                        enabled = !state.testingConnection,
+                        shape = RoundedCornerShape(16.dp),
+                    )
                 }
-                AnimatedVisibility(provider != AiProvider.ON_DEVICE) {
+                AnimatedVisibility(needsModel) {
                     OutlinedTextField(
                         value = model,
                         onValueChange = { model = it },
@@ -304,6 +357,25 @@ private fun ProviderDialog(
                         enabled = !state.testingConnection,
                         shape = RoundedCornerShape(16.dp),
                     )
+                }
+                AnimatedVisibility(state.availableModels.isNotEmpty() && needsModel) {
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text("Models available to this key", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            items(state.availableModels.take(40), key = { it }) { available ->
+                                AssistChip(
+                                    onClick = { model = available },
+                                    label = {
+                                        Text(
+                                            available,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                        )
+                                    },
+                                )
+                            }
+                        }
+                    }
                 }
                 state.connectionMessage?.let { message ->
                     Row(verticalAlignment = Alignment.Top) {
@@ -330,17 +402,18 @@ private fun ProviderDialog(
                 }
                 AnimatedVisibility(state.connectionSucceeded == false && provider.keyHelpUrl() != null) {
                     TextButton(onClick = { provider.keyHelpUrl()?.let(uriHandler::openUri) }) {
-                        Text(if (provider == AiProvider.GEMINI) "Create a new Gemini key" else "Open provider key settings")
+                        Text(provider.keyHelpLabel())
                     }
                 }
                 Text(
                     when {
-                        needsKey -> {
-                        "The key is sent only to ${provider.displayName()}'s official API and remains encrypted on this device."
-                        }
-                        else -> {
-                        "BYAK checks Android AICore and prepares Gemini Nano directly on this phone. No laptop, local server, or API key is required."
-                        }
+                        needsKey -> "The key is sent only to ${provider.displayName()}'s API and remains encrypted on this device."
+                        provider == AiProvider.PORTABLE_LOCAL ->
+                            "The model is stored in BYAK's private app folder. Prompts and responses remain on this phone."
+                        provider == AiProvider.ON_DEVICE ->
+                            "Android AICore owns Gemini Nano availability and download. BYAK cannot force-enable it on unsupported hardware."
+                        else ->
+                            "Auto removes the AICore dead end: local when possible, connected provider when necessary."
                     },
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     fontSize = 12.sp,
@@ -348,24 +421,35 @@ private fun ProviderDialog(
             }
         },
         confirmButton = {
+            val keyReady = !needsKey || hasExisting || key.isNotBlank()
+            val modelReady = !needsModel || model.isNotBlank()
+            val urlReady = provider != AiProvider.CUSTOM || baseUrl.isNotBlank()
             Button(
-                onClick = { save(provider, key, model) },
-                enabled = !state.testingConnection && (
-                    provider == AiProvider.ON_DEVICE ||
-                        (model.isNotBlank() && (hasExisting || key.isNotBlank()))
-                ),
+                onClick = { save(provider, key, model, baseUrl) },
+                enabled = !state.testingConnection && keyReady && modelReady && urlReady,
             ) {
-                if (state.testingConnection) CircularProgressIndicator(Modifier.size(17.dp), strokeWidth = 2.dp)
-                else Text(
-                    when {
-                        provider == AiProvider.ON_DEVICE -> "Prepare Phone AI"
-                        hasExisting -> "Update & test"
-                        else -> "Connect & test"
-                    },
-                )
+                if (state.testingConnection) {
+                    CircularProgressIndicator(Modifier.size(17.dp), strokeWidth = 2.dp)
+                } else {
+                    Text(
+                        when (provider) {
+                            AiProvider.AUTO -> "Use Auto"
+                            AiProvider.PORTABLE_LOCAL -> when (state.portableStatus) {
+                                ai.byak.app.data.localai.PortableModelStatus.READY -> "Use offline"
+                                ai.byak.app.data.localai.PortableModelStatus.DOWNLOADING -> "Check status"
+                                ai.byak.app.data.localai.PortableModelStatus.FAILED -> "Retry download"
+                                ai.byak.app.data.localai.PortableModelStatus.MISSING -> "Download local AI"
+                            }
+                            AiProvider.ON_DEVICE -> "Check Phone AI"
+                            else -> if (hasExisting) "Update & test" else "Connect & test"
+                        },
+                    )
+                }
             }
         },
-        dismissButton = { TextButton(dismiss, enabled = !state.testingConnection) { Text("Done") } },
+        dismissButton = {
+            TextButton(dismiss, enabled = !state.testingConnection) { Text("Done") }
+        },
     )
 }
 
@@ -374,45 +458,91 @@ private fun SettingsUiState.hasKeyFor(provider: AiProvider): Boolean = when (pro
     AiProvider.OPENROUTER -> hasOpenRouter
     AiProvider.ANTHROPIC -> hasAnthropic
     AiProvider.GEMINI -> hasGemini
-    AiProvider.ON_DEVICE -> true
+    AiProvider.NVIDIA -> hasNvidia
+    AiProvider.GROQ -> hasGroq
+    AiProvider.MISTRAL -> hasMistral
+    AiProvider.DEEPSEEK -> hasDeepSeek
+    AiProvider.CUSTOM -> hasCustom
+    AiProvider.PORTABLE_LOCAL ->
+        portableStatus == ai.byak.app.data.localai.PortableModelStatus.READY
+    AiProvider.AUTO, AiProvider.ON_DEVICE -> true
 }
 
 private fun AiProvider.displayName(): String = when (this) {
-    AiProvider.OPENAI -> "OpenAI"
+    AiProvider.AUTO -> "Auto"
+    AiProvider.PORTABLE_LOCAL -> "Local download"
+    AiProvider.ON_DEVICE -> "Gemini Nano"
     AiProvider.OPENROUTER -> "OpenRouter"
-    AiProvider.ANTHROPIC -> "Claude"
     AiProvider.GEMINI -> "Gemini"
-    AiProvider.ON_DEVICE -> "Phone AI"
+    AiProvider.NVIDIA -> "NVIDIA"
+    AiProvider.GROQ -> "Groq"
+    AiProvider.MISTRAL -> "Mistral"
+    AiProvider.DEEPSEEK -> "DeepSeek"
+    AiProvider.OPENAI -> "OpenAI"
+    AiProvider.ANTHROPIC -> "Claude"
+    AiProvider.CUSTOM -> "Universal API"
 }
 
 private fun AiProvider.defaultModel(): String = when (this) {
+    AiProvider.AUTO -> SecureStore.AUTO_MODEL
+    AiProvider.PORTABLE_LOCAL -> SecureStore.PORTABLE_LOCAL_MODEL
+    AiProvider.ON_DEVICE -> SecureStore.ON_DEVICE_MODEL
     AiProvider.OPENAI -> "gpt-5-mini"
     AiProvider.OPENROUTER -> "openrouter/auto"
     AiProvider.ANTHROPIC -> "claude-sonnet-4-5"
-    AiProvider.GEMINI -> "gemini-3.1-flash-lite"
-    AiProvider.ON_DEVICE -> "Gemini Nano"
+    AiProvider.GEMINI -> "gemini-2.5-flash-lite"
+    AiProvider.NVIDIA -> "meta/llama-3.1-70b-instruct"
+    AiProvider.GROQ -> "llama-3.3-70b-versatile"
+    AiProvider.MISTRAL -> "mistral-small-latest"
+    AiProvider.DEEPSEEK -> "deepseek-chat"
+    AiProvider.CUSTOM -> ""
 }
 
 private fun AiProvider.modelHint(): String = when (this) {
-    AiProvider.OPENROUTER -> "Use openrouter/auto or a provider/model ID from OpenRouter."
+    AiProvider.OPENROUTER -> "Use openrouter/auto or any model ID returned by OpenRouter."
+    AiProvider.GEMINI -> "Stable default: gemini-2.5-flash-lite"
+    AiProvider.NVIDIA -> "Use a model ID available to your NVIDIA API Catalog key."
+    AiProvider.GROQ -> "Use a model returned by your Groq model catalog."
+    AiProvider.MISTRAL -> "Example: mistral-small-latest"
+    AiProvider.DEEPSEEK -> "Example: deepseek-chat"
     AiProvider.OPENAI -> "Example: gpt-5-mini"
     AiProvider.ANTHROPIC -> "Example: claude-sonnet-4-5"
-    AiProvider.GEMINI -> "Example: gemini-3.1-flash-lite"
-    AiProvider.ON_DEVICE -> "Runs on this phone through Android AICore; no cloud key is required."
+    AiProvider.CUSTOM -> "Enter the OpenAI-compatible model ID."
+    AiProvider.AUTO, AiProvider.PORTABLE_LOCAL, AiProvider.ON_DEVICE -> "Managed automatically."
 }
 
 private fun SettingsUiState.modelFor(provider: AiProvider): String = when (provider) {
+    AiProvider.AUTO -> SecureStore.AUTO_MODEL
+    AiProvider.PORTABLE_LOCAL -> SecureStore.PORTABLE_LOCAL_MODEL
+    AiProvider.ON_DEVICE -> SecureStore.ON_DEVICE_MODEL
     AiProvider.OPENAI -> openAiModel
     AiProvider.OPENROUTER -> openRouterModel
     AiProvider.ANTHROPIC -> anthropicModel
     AiProvider.GEMINI -> geminiModel
-    AiProvider.ON_DEVICE -> "Gemini Nano"
+    AiProvider.NVIDIA -> nvidiaModel
+    AiProvider.GROQ -> groqModel
+    AiProvider.MISTRAL -> mistralModel
+    AiProvider.DEEPSEEK -> deepSeekModel
+    AiProvider.CUSTOM -> customModel
 }
+
+private fun SettingsUiState.baseUrlFor(provider: AiProvider): String =
+    if (provider == AiProvider.CUSTOM) customBaseUrl else ""
 
 private fun AiProvider.keyHelpUrl(): String? = when (this) {
     AiProvider.OPENROUTER -> "https://openrouter.ai/settings/keys"
     AiProvider.GEMINI -> "https://aistudio.google.com/app/apikey"
+    AiProvider.NVIDIA -> "https://build.nvidia.com/"
+    AiProvider.GROQ -> "https://console.groq.com/keys"
+    AiProvider.MISTRAL -> "https://console.mistral.ai/api-keys/"
+    AiProvider.DEEPSEEK -> "https://platform.deepseek.com/api_keys"
     AiProvider.OPENAI -> "https://platform.openai.com/api-keys"
     AiProvider.ANTHROPIC -> "https://console.anthropic.com/settings/keys"
-    AiProvider.ON_DEVICE -> null
+    AiProvider.CUSTOM, AiProvider.AUTO, AiProvider.PORTABLE_LOCAL, AiProvider.ON_DEVICE -> null
+}
+
+private fun AiProvider.keyHelpLabel(): String = when (this) {
+    AiProvider.GEMINI -> "Create a Google AI Studio key"
+    AiProvider.NVIDIA -> "Create an NVIDIA API key"
+    else -> "Open provider key settings"
 }
