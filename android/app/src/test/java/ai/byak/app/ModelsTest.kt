@@ -3,6 +3,7 @@ package ai.byak.app
 import ai.byak.app.billing.BillingManager
 import ai.byak.app.data.local.VectorCodec
 import ai.byak.app.data.repository.providerFailure
+import ai.byak.app.data.security.normalizeCompatibleBaseUrl
 import ai.byak.app.data.security.normalizeCredential
 import ai.byak.app.data.security.SecureState
 import ai.byak.app.data.security.withSupportedProvider
@@ -28,9 +29,13 @@ class ModelsTest {
         assertTrue(AiProvider.entries.contains(AiProvider.OPENROUTER))
     }
 
-    @Test fun onDeviceAndImageProvidersRemainFirstClassFeatures() {
+    @Test fun localUniversalAndImageProvidersRemainFirstClassFeatures() {
+        assertTrue(AiProvider.entries.contains(AiProvider.AUTO))
+        assertTrue(AiProvider.entries.contains(AiProvider.PORTABLE_LOCAL))
         assertTrue(AiProvider.entries.contains(AiProvider.ON_DEVICE))
-        assertEquals(AiProvider.ON_DEVICE, AiProvider.entries.first())
+        assertTrue(AiProvider.entries.contains(AiProvider.NVIDIA))
+        assertTrue(AiProvider.entries.contains(AiProvider.CUSTOM))
+        assertEquals(AiProvider.AUTO, AiProvider.entries.first())
         assertEquals(listOf(ImageProvider.OPENROUTER, ImageProvider.GEMINI), ImageProvider.entries)
     }
 
@@ -63,18 +68,27 @@ class ModelsTest {
     @Test fun encryptedStateMigrationDefaultsOpenRouterKeySafely() {
         val decoded = Json { ignoreUnknownKeys = true }.decodeFromString<SecureState>("{}")
         assertEquals("", decoded.openRouterKey)
-        assertEquals("gemini-3.1-flash-lite", decoded.geminiModel)
-        assertEquals("ON_DEVICE", decoded.selectedProvider)
-        assertEquals("Gemini Nano", decoded.selectedModel)
+        assertEquals("gemini-2.5-flash-lite", decoded.geminiModel)
+        assertEquals("AUTO", decoded.selectedProvider)
+        assertEquals("Best available", decoded.selectedModel)
     }
 
-    @Test fun removedLocalServerSelectionMigratesToPhoneAi() {
+    @Test fun removedLocalServerSelectionMigratesToAuto() {
         val migrated = SecureState(
             selectedProvider = "OLLAMA",
             selectedModel = "deepseek-coder:6.7b",
         ).withSupportedProvider()
-        assertEquals("ON_DEVICE", migrated.selectedProvider)
-        assertEquals("Gemini Nano", migrated.selectedModel)
+        assertEquals("AUTO", migrated.selectedProvider)
+        assertEquals("Best available", migrated.selectedModel)
+    }
+
+    @Test fun universalEndpointNormalizationRequiresHttps() {
+        assertEquals(
+            "https://models.example.com/v1",
+            normalizeCompatibleBaseUrl("https://models.example.com/v1/chat/completions"),
+        )
+        val failure = runCatching { normalizeCompatibleBaseUrl("http://models.example.com/v1") }
+        assertTrue(failure.isFailure)
     }
 
     @Test fun playProductIdentifiersRemainStable() {
