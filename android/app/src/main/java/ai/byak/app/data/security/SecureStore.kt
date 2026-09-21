@@ -203,7 +203,7 @@ class SecureStore @Inject constructor(
         AiProvider.OPENAI -> "https://api.openai.com/v1"
         AiProvider.OPENROUTER -> "https://openrouter.ai/api/v1"
         AiProvider.ANTHROPIC -> "https://api.anthropic.com/v1"
-        AiProvider.GEMINI -> "https://generativelanguage.googleapis.com/v1beta"
+        AiProvider.GEMINI -> "https://generativelanguage.googleapis.com/v1"
         AiProvider.NVIDIA -> "https://integrate.api.nvidia.com/v1"
         AiProvider.GROQ -> "https://api.groq.com/openai/v1"
         AiProvider.MISTRAL -> "https://api.mistral.ai/v1"
@@ -240,10 +240,53 @@ class SecureStore @Inject constructor(
 }
 
 internal fun SecureState.withSupportedProvider(): SecureState {
-    val supported = AiProvider.entries.any { it.name == selectedProvider }
-    return if (supported) this else copy(
-        selectedProvider = AiProvider.AUTO.name,
-        selectedModel = SecureStore.AUTO_MODEL,
+    val provider = AiProvider.entries.firstOrNull { it.name == selectedProvider } ?: AiProvider.AUTO
+    val migratedGemini = when (geminiModel) {
+        "gemini-2.5-flash-lite", "gemini-2.5-flash" -> "gemini-3.8-flash"
+        else -> geminiModel
+    }
+    val migratedOpenAi = when (openAiModel) {
+        "gpt-5-mini", "gpt-4.1-mini" -> "gpt-5.6-luna"
+        else -> openAiModel
+    }
+    val migratedAnthropic = when (anthropicModel) {
+        "claude-sonnet-4-5", "claude-3-5-haiku-latest" -> "claude-sonnet-5"
+        else -> anthropicModel
+    }
+    val migratedDeepSeek = when (deepSeekModel) {
+        "deepseek-chat", "deepseek-reasoner" -> "deepseek-v4-flash"
+        else -> deepSeekModel
+    }
+    val migratedSelected = when (provider) {
+        AiProvider.GEMINI -> when (selectedModel) {
+            "gemini-2.5-flash-lite", "gemini-2.5-flash" -> migratedGemini
+            else -> selectedModel
+        }
+        AiProvider.OPENAI -> when (selectedModel) {
+            "gpt-5-mini", "gpt-4.1-mini" -> migratedOpenAi
+            else -> selectedModel
+        }
+        AiProvider.ANTHROPIC -> when (selectedModel) {
+            "claude-sonnet-4-5", "claude-3-5-haiku-latest" -> migratedAnthropic
+            else -> selectedModel
+        }
+        AiProvider.DEEPSEEK -> when (selectedModel) {
+            "deepseek-chat", "deepseek-reasoner" -> migratedDeepSeek
+            else -> selectedModel
+        }
+        else -> if (provider == AiProvider.AUTO && selectedProvider != AiProvider.AUTO.name) {
+            SecureStore.AUTO_MODEL
+        } else {
+            selectedModel
+        }
+    }
+    return copy(
+        selectedProvider = provider.name,
+        selectedModel = migratedSelected,
+        geminiModel = migratedGemini,
+        openAiModel = migratedOpenAi,
+        anthropicModel = migratedAnthropic,
+        deepSeekModel = migratedDeepSeek,
     )
 }
 
