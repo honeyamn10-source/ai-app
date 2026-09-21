@@ -488,26 +488,26 @@ private fun AiProvider.defaultModel(): String = when (this) {
     AiProvider.AUTO -> SecureStore.AUTO_MODEL
     AiProvider.PORTABLE_LOCAL -> SecureStore.PORTABLE_LOCAL_MODEL
     AiProvider.ON_DEVICE -> SecureStore.ON_DEVICE_MODEL
-    AiProvider.OPENAI -> "gpt-5-mini"
+    AiProvider.OPENAI -> "gpt-5.6-luna"
     AiProvider.OPENROUTER -> "openrouter/auto"
-    AiProvider.ANTHROPIC -> "claude-sonnet-4-5"
-    AiProvider.GEMINI -> "gemini-2.5-flash-lite"
+    AiProvider.ANTHROPIC -> "claude-sonnet-5"
+    AiProvider.GEMINI -> "gemini-3.8-flash"
     AiProvider.NVIDIA -> "meta/llama-3.1-70b-instruct"
     AiProvider.GROQ -> "llama-3.3-70b-versatile"
     AiProvider.MISTRAL -> "mistral-small-latest"
-    AiProvider.DEEPSEEK -> "deepseek-chat"
+    AiProvider.DEEPSEEK -> "deepseek-v4-flash"
     AiProvider.CUSTOM -> ""
 }
 
 private fun AiProvider.modelHint(): String = when (this) {
     AiProvider.OPENROUTER -> "Use openrouter/auto or any model ID returned by OpenRouter."
-    AiProvider.GEMINI -> "Stable default: gemini-2.5-flash-lite"
+    AiProvider.GEMINI -> "Stable default: gemini-3.8-flash"
     AiProvider.NVIDIA -> "Use a model ID available to your NVIDIA API Catalog key."
     AiProvider.GROQ -> "Use a model returned by your Groq model catalog."
     AiProvider.MISTRAL -> "Example: mistral-small-latest"
-    AiProvider.DEEPSEEK -> "Example: deepseek-chat"
-    AiProvider.OPENAI -> "Example: gpt-5-mini"
-    AiProvider.ANTHROPIC -> "Example: claude-sonnet-4-5"
+    AiProvider.DEEPSEEK -> "Example: deepseek-v4-flash"
+    AiProvider.OPENAI -> "Example: gpt-5.6-luna"
+    AiProvider.ANTHROPIC -> "Example: claude-sonnet-5"
     AiProvider.CUSTOM -> "Enter the OpenAI-compatible model ID."
     AiProvider.AUTO, AiProvider.PORTABLE_LOCAL, AiProvider.ON_DEVICE -> "Managed automatically."
 }
