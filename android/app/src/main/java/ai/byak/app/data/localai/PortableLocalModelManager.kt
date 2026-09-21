@@ -20,9 +20,13 @@ import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 
@@ -88,6 +92,14 @@ class PortableLocalModelManager @Inject constructor(
             }
         }
     }
+
+    fun observeState(): Flow<PortableModelState> = flow {
+        while (currentCoroutineContext().isActive) {
+            val current = state()
+            emit(current)
+            delay(if (current.status == PortableModelStatus.DOWNLOADING) 750L else 3_000L)
+        }
+    }.distinctUntilChanged().flowOn(Dispatchers.IO)
 
     fun startDownload(): PortableModelState {
         val current = state()
