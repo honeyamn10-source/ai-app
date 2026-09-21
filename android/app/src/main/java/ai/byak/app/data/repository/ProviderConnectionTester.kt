@@ -2,6 +2,8 @@ package ai.byak.app.data.repository
 
 import ai.byak.app.data.localai.OnDeviceAvailability
 import ai.byak.app.data.localai.OnDeviceModelManager
+import ai.byak.app.data.localai.PortableLocalModelManager
+import ai.byak.app.data.localai.PortableModelStatus
 import ai.byak.app.data.security.SecureStore
 import ai.byak.app.data.security.normalizeCompatibleBaseUrl
 import ai.byak.app.data.security.normalizeCredential
@@ -42,6 +44,7 @@ class ProviderConnectionTester @Inject constructor(
     private val client: HttpClient,
     private val json: Json,
     private val onDevice: OnDeviceModelManager,
+    private val portableLocal: PortableLocalModelManager,
     private val secureStore: SecureStore,
 ) {
     suspend fun test(
@@ -52,6 +55,19 @@ class ProviderConnectionTester @Inject constructor(
     ): Result<ProviderConnectionReport> = runCatching {
         when (provider) {
             AiProvider.AUTO -> testAuto()
+            AiProvider.PORTABLE_LOCAL -> {
+                val prepared = when (portableLocal.state().status) {
+                    PortableModelStatus.MISSING -> portableLocal.startDownload()
+                    PortableModelStatus.FAILED -> portableLocal.retryDownload()
+                    else -> portableLocal.state()
+                }
+                ProviderConnectionReport(
+                    provider = provider,
+                    resolvedModel = SecureStore.PORTABLE_LOCAL_MODEL,
+                    availableModels = listOf(SecureStore.PORTABLE_LOCAL_MODEL),
+                    message = prepared.message,
+                )
+            }
             AiProvider.ON_DEVICE -> {
                 val prepared = onDevice.prepare()
                 ProviderConnectionReport(
@@ -98,7 +114,7 @@ class ProviderConnectionTester @Inject constructor(
                         testCompatible(provider, key, model, cleanBase, emptyList())
                             .copy(normalizedBaseUrl = cleanBase)
                     }
-                    AiProvider.AUTO, AiProvider.ON_DEVICE -> error("Handled above")
+                    AiProvider.AUTO, AiProvider.PORTABLE_LOCAL, AiProvider.ON_DEVICE -> error("Handled above")
                 }
                 report.copy(
                     normalizedCredential = key,
