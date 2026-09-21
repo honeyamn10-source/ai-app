@@ -6,6 +6,9 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import ai.byak.app.billing.BillingManager
 import ai.byak.app.billing.BillingState
+import ai.byak.app.data.localai.PortableLocalModelManager
+import ai.byak.app.data.localai.PortableModelState
+import ai.byak.app.data.localai.PortableModelStatus
 import ai.byak.app.data.repository.ProviderConnectionTester
 import ai.byak.app.data.security.SecureStore
 import ai.byak.app.domain.model.AiProvider
@@ -24,16 +27,30 @@ import kotlinx.coroutines.launch
 @Immutable
 data class SettingsUiState(
     val session: Session? = null,
-    val provider: AiProvider = AiProvider.ON_DEVICE,
-    val model: String = "Gemini Nano",
+    val provider: AiProvider = AiProvider.AUTO,
+    val model: String = SecureStore.AUTO_MODEL,
     val openAiModel: String = "gpt-5-mini",
     val openRouterModel: String = "openrouter/auto",
     val anthropicModel: String = "claude-sonnet-4-5",
-    val geminiModel: String = "gemini-3.1-flash-lite",
+    val geminiModel: String = "gemini-2.5-flash-lite",
+    val nvidiaModel: String = "meta/llama-3.1-70b-instruct",
+    val groqModel: String = "llama-3.3-70b-versatile",
+    val mistralModel: String = "mistral-small-latest",
+    val deepSeekModel: String = "deepseek-chat",
+    val customModel: String = "",
+    val customBaseUrl: String = "",
     val hasOpenAi: Boolean = false,
     val hasOpenRouter: Boolean = false,
     val hasAnthropic: Boolean = false,
     val hasGemini: Boolean = false,
+    val hasNvidia: Boolean = false,
+    val hasGroq: Boolean = false,
+    val hasMistral: Boolean = false,
+    val hasDeepSeek: Boolean = false,
+    val hasCustom: Boolean = false,
+    val portableStatus: PortableModelStatus = PortableModelStatus.MISSING,
+    val portableProgress: Int = 0,
+    val portableMessage: String = "",
     val testingConnection: Boolean = false,
     val connectionMessage: String? = null,
     val connectionSucceeded: Boolean? = null,
@@ -55,27 +72,45 @@ class SettingsViewModel @Inject constructor(
     private val authRepository: AuthRepository,
     private val billingManager: BillingManager,
     private val connectionTester: ProviderConnectionTester,
+    private val portableLocal: PortableLocalModelManager,
 ) : ViewModel() {
     private val connection = MutableStateFlow(ConnectionUiState())
+    private val portable = MutableStateFlow(portableLocal.state())
 
     val state: StateFlow<SettingsUiState> = combine(
         secureStore.state,
         authRepository.session,
         billingManager.state,
         connection,
-    ) { secure, session, billing, connectionState ->
+        portable,
+    ) { secure, session, billing, connectionState, portableState ->
         SettingsUiState(
             session = session,
-            provider = runCatching { AiProvider.valueOf(secure.selectedProvider) }.getOrDefault(AiProvider.ON_DEVICE),
+            provider = runCatching { AiProvider.valueOf(secure.selectedProvider) }
+                .getOrDefault(AiProvider.AUTO),
             model = secure.selectedModel,
             openAiModel = secure.openAiModel,
             openRouterModel = secure.openRouterModel,
             anthropicModel = secure.anthropicModel,
             geminiModel = secure.geminiModel,
+            nvidiaModel = secure.nvidiaModel,
+            groqModel = secure.groqModel,
+            mistralModel = secure.mistralModel,
+            deepSeekModel = secure.deepSeekModel,
+            customModel = secure.customModel,
+            customBaseUrl = secure.customBaseUrl,
             hasOpenAi = secure.openAiKey.isNotBlank(),
             hasOpenRouter = secure.openRouterKey.isNotBlank(),
             hasAnthropic = secure.anthropicKey.isNotBlank(),
             hasGemini = secure.geminiKey.isNotBlank(),
+            hasNvidia = secure.nvidiaKey.isNotBlank(),
+            hasGroq = secure.groqKey.isNotBlank(),
+            hasMistral = secure.mistralKey.isNotBlank(),
+            hasDeepSeek = secure.deepSeekKey.isNotBlank(),
+            hasCustom = secure.customKey.isNotBlank() && secure.customBaseUrl.isNotBlank(),
+            portableStatus = portableState.status,
+            portableProgress = portableState.progressPercent,
+            portableMessage = portableState.message,
             testingConnection = connectionState.testing,
             connectionMessage = connectionState.message,
             connectionSucceeded = connectionState.succeeded,
@@ -84,19 +119,30 @@ class SettingsViewModel @Inject constructor(
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), SettingsUiState())
 
-    fun saveAndTestProvider(provider: AiProvider, newKey: String, model: String) {
+    fun saveAndTestProvider(
+        provider: AiProvider,
+        newKey: String,
+        model: String,
+        baseUrl: String,
+    ) {
         if (connection.value.testing) return
         viewModelScope.launch {
-            connection.value = ConnectionUiState(testing = true, message = "Checking the secure connection…")
+            connection.value = ConnectionUiState(testing = true, message = when (provider) {
+                AiProvider.PORTABLE_LOCAL -> "Checking the local model…"
+                AiProvider.ON_DEVICE -> "Checking Android AICore…"
+                else -> "Checking the secure connection…"
+            })
             val existing = secureStore.apiKey(provider.name)
             val effectiveKey = newKey.trim().ifBlank { existing }
-            connectionTester.test(provider, effectiveKey, model.trim())
+            connectionTester.test(provider, effectiveKey, model.trim(), baseUrl.trim())
                 .onSuccess { report ->
                     secureStore.saveProviderKey(
                         provider = provider.name,
                         key = report.normalizedCredential.ifBlank { effectiveKey },
                         model = report.resolvedModel,
+                        baseUrl = report.normalizedBaseUrl.ifBlank { baseUrl },
                     )
+                    portable.value = portableLocal.state()
                     connection.value = ConnectionUiState(
                         message = report.message,
                         succeeded = true,
@@ -104,12 +150,17 @@ class SettingsViewModel @Inject constructor(
                     )
                 }
                 .onFailure { error ->
+                    portable.value = portableLocal.state()
                     connection.value = ConnectionUiState(
                         message = error.message ?: "Connection test failed. Check the key and try again.",
                         succeeded = false,
                     )
                 }
         }
+    }
+
+    fun refreshPortableModel() {
+        portable.value = portableLocal.state()
     }
 
     fun clearConnectionMessage() = connection.update { ConnectionUiState() }
