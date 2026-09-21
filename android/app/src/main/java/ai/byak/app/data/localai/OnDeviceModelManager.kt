@@ -63,7 +63,7 @@ class OnDeviceModelManager @Inject constructor() {
                 "Gemini Nano is downloading through Android. Keep the phone online, then check again when it finishes.",
             )
             OnDeviceAvailability.UNSUPPORTED -> error(
-                "Phone AI is not supported by this device yet. It requires Android AICore, a supported chipset, current Google Play services, and a locked bootloader. You can still connect a cloud provider from this phone.",
+                "Gemini Nano is not available on this phone's AICore. Choose Portable Local AI for an offline model download, or use Auto with any connected cloud provider.",
             )
         }
     }
@@ -122,7 +122,7 @@ class OnDeviceModelManager @Inject constructor() {
     private fun phoneAiFailure(error: Throwable): String {
         val detail = error.message.orEmpty().take(180)
         return buildString {
-            append("Android could not start Phone AI. Update Google Play services and the Android AICore system component, restart the phone, and try again.")
+            append("Android could not start Gemini Nano. Choose Portable Local AI for a separate offline model, or connect a cloud provider with Auto.")
             if (detail.isNotBlank()) append(" ").append(detail)
         }
     }
