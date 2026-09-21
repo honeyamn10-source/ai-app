@@ -64,6 +64,7 @@ internal fun AiProvider.displayName(): String = when (this) {
     AiProvider.DEEPSEEK -> "DeepSeek"
     AiProvider.CUSTOM -> "Universal API"
     AiProvider.AUTO -> "Auto"
+    AiProvider.PORTABLE_LOCAL -> "Portable Local AI"
     AiProvider.ON_DEVICE -> "Gemini Nano"
 }
 
