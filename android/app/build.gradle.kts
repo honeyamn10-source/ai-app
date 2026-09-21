@@ -17,8 +17,8 @@ android {
         applicationId = "ai.byak.app"
         minSdk = 26
         targetSdk = 37
-        versionCode = 28
-        versionName = "2.7.0"
+        versionCode = 29
+        versionName = "2.8.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         buildConfigField(
             "String",
