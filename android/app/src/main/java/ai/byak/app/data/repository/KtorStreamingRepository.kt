@@ -205,7 +205,7 @@ class KtorStreamingRepository @Inject constructor(
             },
         )
         AiProvider.GEMINI -> Endpoint(
-            url = "https://generativelanguage.googleapis.com/v1beta/models/${urlEncode(request.model)}:streamGenerateContent?alt=sse",
+            url = "${secureStore.baseUrl(AiProvider.GEMINI)}/models/${urlEncode(request.model)}:streamGenerateContent?alt=sse",
             headers = mapOf("x-goog-api-key" to apiKey),
             body = buildJsonObject {
                 request.systemPrompt?.takeIf(String::isNotBlank)?.let { prompt ->
