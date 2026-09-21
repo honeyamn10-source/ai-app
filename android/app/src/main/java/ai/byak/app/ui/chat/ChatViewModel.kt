@@ -7,6 +7,10 @@ import ai.byak.app.domain.model.ChatMessage
 import ai.byak.app.domain.model.Conversation
 import ai.byak.app.domain.model.AiProvider
 import ai.byak.app.domain.repository.ChatRepository
+import ai.byak.app.data.localai.PortableLocalModelManager
+import ai.byak.app.data.localai.PortableModelState
+import ai.byak.app.data.localai.PortableModelStatus
+import ai.byak.app.data.security.SecureState
 import ai.byak.app.data.security.SecureStore
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
@@ -42,6 +46,7 @@ sealed interface ChatEffect { data class Error(val message: String) : ChatEffect
 class ChatViewModel @Inject constructor(
     private val repository: ChatRepository,
     private val secureStore: SecureStore,
+    private val portableLocal: PortableLocalModelManager,
 ) : ViewModel() {
     private val activeId = MutableStateFlow<String?>(null)
     private val generating = MutableStateFlow(false)
@@ -53,15 +58,21 @@ class ChatViewModel @Inject constructor(
         if (id == null) emptyFlow() else repository.observeMessages(id)
     }
 
+    private val providerState: Flow<Pair<SecureState, PortableModelState>> = combine(
+        secureStore.state,
+        portableLocal.observeState(),
+    ) { secure, portable -> secure to portable }
+
     val state: StateFlow<ChatUiState> = combine(
-        repository.observeConversations(), activeId, messages, generating, secureStore.state,
-    ) { conversations, selected, items, isGenerating, secure ->
+        repository.observeConversations(), activeId, messages, generating, providerState,
+    ) { conversations, selected, items, isGenerating, provider ->
+        val (secure, portable) = provider
         ChatUiState(
             conversations = conversations,
             activeConversationId = selected,
             messages = items,
             generating = isGenerating,
-            providerReady = secureStore.apiKey(secure.selectedProvider).isNotBlank(),
+            providerReady = chatProviderReady(secure, portable.status),
             providerName = runCatching { AiProvider.valueOf(secure.selectedProvider) }
                 .getOrDefault(AiProvider.AUTO)
                 .customerName(),
@@ -93,6 +104,30 @@ class ChatViewModel @Inject constructor(
     fun stop() {
         generationJob?.cancel()
         generating.value = false
+    }
+}
+
+internal fun chatProviderReady(
+    secure: SecureState,
+    portableStatus: PortableModelStatus,
+): Boolean {
+    val provider = runCatching { AiProvider.valueOf(secure.selectedProvider) }
+        .getOrDefault(AiProvider.AUTO)
+    return when (provider) {
+        AiProvider.AUTO, AiProvider.ON_DEVICE -> true
+        AiProvider.PORTABLE_LOCAL -> portableStatus == PortableModelStatus.READY
+        AiProvider.OPENAI -> secure.openAiKey.isNotBlank() && secure.openAiModel.isNotBlank()
+        AiProvider.OPENROUTER -> secure.openRouterKey.isNotBlank() && secure.openRouterModel.isNotBlank()
+        AiProvider.ANTHROPIC -> secure.anthropicKey.isNotBlank() && secure.anthropicModel.isNotBlank()
+        AiProvider.GEMINI -> secure.geminiKey.isNotBlank() && secure.geminiModel.isNotBlank()
+        AiProvider.NVIDIA -> secure.nvidiaKey.isNotBlank() && secure.nvidiaModel.isNotBlank()
+        AiProvider.GROQ -> secure.groqKey.isNotBlank() && secure.groqModel.isNotBlank()
+        AiProvider.MISTRAL -> secure.mistralKey.isNotBlank() && secure.mistralModel.isNotBlank()
+        AiProvider.DEEPSEEK -> secure.deepSeekKey.isNotBlank() && secure.deepSeekModel.isNotBlank()
+        AiProvider.CUSTOM ->
+            secure.customKey.isNotBlank() &&
+                secure.customModel.isNotBlank() &&
+                secure.customBaseUrl.isNotBlank()
     }
 }
 
