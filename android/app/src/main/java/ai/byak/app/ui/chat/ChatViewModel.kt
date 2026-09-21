@@ -63,7 +63,7 @@ class ChatViewModel @Inject constructor(
             generating = isGenerating,
             providerReady = secureStore.apiKey(secure.selectedProvider).isNotBlank(),
             providerName = runCatching { AiProvider.valueOf(secure.selectedProvider) }
-                .getOrDefault(AiProvider.ON_DEVICE)
+                .getOrDefault(AiProvider.AUTO)
                 .customerName(),
             model = secure.selectedModel,
         )
@@ -97,9 +97,16 @@ class ChatViewModel @Inject constructor(
 }
 
 private fun AiProvider.customerName(): String = when (this) {
-    AiProvider.ON_DEVICE -> "Phone AI"
+    AiProvider.AUTO -> "Auto"
+    AiProvider.PORTABLE_LOCAL -> "Local AI"
+    AiProvider.ON_DEVICE -> "Gemini Nano"
     AiProvider.OPENROUTER -> "OpenRouter"
     AiProvider.GEMINI -> "Gemini"
+    AiProvider.NVIDIA -> "NVIDIA"
+    AiProvider.GROQ -> "Groq"
+    AiProvider.MISTRAL -> "Mistral"
+    AiProvider.DEEPSEEK -> "DeepSeek"
     AiProvider.OPENAI -> "OpenAI"
     AiProvider.ANTHROPIC -> "Claude"
+    AiProvider.CUSTOM -> "Universal API"
 }
