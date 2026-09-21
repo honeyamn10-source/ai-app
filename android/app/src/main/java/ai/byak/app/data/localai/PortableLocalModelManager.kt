@@ -155,7 +155,7 @@ class PortableLocalModelManager @Inject constructor(
             val fullText = StringBuilder()
             activeEngine.createConversation().use { conversation ->
                 conversation.sendMessageAsync(buildPrompt(request)).collect { message ->
-                    val received = message.text
+                    val received = message.toString()
                     val delta = when {
                         received.isBlank() -> ""
                         received.startsWith(fullText.toString()) -> received.removePrefix(fullText.toString())
