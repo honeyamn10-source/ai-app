@@ -63,7 +63,7 @@ class ImageGenerationRepositoryImpl @Inject constructor(
             ImageProvider.GEMINI -> {
                 val key = secureStore.apiKey("GEMINI")
                 require(key.isNotBlank()) { "Connect Gemini in You → AI connection first." }
-                val response = client.get("https://generativelanguage.googleapis.com/v1beta/models") {
+                val response = client.get("${secureStore.baseUrl(AiProvider.GEMINI)}/models") {
                     header("x-goog-api-key", key)
                 }
                 val body = response.bodyAsText().take(MAX_CATALOG_BODY)
@@ -152,7 +152,7 @@ class ImageGenerationRepositoryImpl @Inject constructor(
         advanced: Boolean,
     ) = client.post("https://openrouter.ai/api/v1/images") {
             header(HttpHeaders.Authorization, "Bearer $key")
-            header("HTTP-Referer", "https://byak.ai")
+            header("HTTP-Referer", "https://byak.site.je")
             header("X-OpenRouter-Title", "BYAK AI")
             contentType(ContentType.Application.Json)
             setBody(buildJsonObject {
@@ -171,7 +171,7 @@ class ImageGenerationRepositoryImpl @Inject constructor(
     private suspend fun generateGemini(request: ImageGenerationRequest): EncodedImage {
         val key = secureStore.apiKey("GEMINI")
         require(key.isNotBlank()) { "Connect Gemini in You → AI connection first." }
-        val response = client.post("https://generativelanguage.googleapis.com/v1beta/interactions") {
+        val response = client.post("${secureStore.baseUrl(AiProvider.GEMINI)}/interactions") {
             header("x-goog-api-key", key)
             header("Api-Revision", "2026-05-20")
             contentType(ContentType.Application.Json)
