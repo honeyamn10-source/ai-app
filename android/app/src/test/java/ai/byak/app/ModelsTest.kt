@@ -2,6 +2,7 @@ package ai.byak.app
 
 import ai.byak.app.billing.BillingManager
 import ai.byak.app.data.local.VectorCodec
+import ai.byak.app.data.localai.PortableModelStatus
 import ai.byak.app.data.repository.providerFailure
 import ai.byak.app.data.security.normalizeCompatibleBaseUrl
 import ai.byak.app.data.security.normalizeCredential
@@ -9,6 +10,7 @@ import ai.byak.app.data.security.SecureState
 import ai.byak.app.data.security.withSupportedProvider
 import ai.byak.app.domain.model.AiProvider
 import ai.byak.app.domain.model.ImageProvider
+import ai.byak.app.ui.chat.chatProviderReady
 import kotlinx.serialization.json.Json
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -68,9 +70,35 @@ class ModelsTest {
     @Test fun encryptedStateMigrationDefaultsOpenRouterKeySafely() {
         val decoded = Json { ignoreUnknownKeys = true }.decodeFromString<SecureState>("{}")
         assertEquals("", decoded.openRouterKey)
-        assertEquals("gemini-2.5-flash-lite", decoded.geminiModel)
+        assertEquals("gemini-3.8-flash", decoded.geminiModel)
         assertEquals("AUTO", decoded.selectedProvider)
         assertEquals("Best available", decoded.selectedModel)
+    }
+
+    @Test fun retiredProviderDefaultsMigrateBeforeAnyRequest() {
+        val migrated = SecureState(
+            selectedProvider = "GEMINI",
+            selectedModel = "gemini-2.5-flash-lite",
+            geminiModel = "gemini-2.5-flash-lite",
+            openAiModel = "gpt-5-mini",
+            anthropicModel = "claude-sonnet-4-5",
+            deepSeekModel = "deepseek-chat",
+        ).withSupportedProvider()
+        assertEquals("gemini-3.8-flash", migrated.selectedModel)
+        assertEquals("gemini-3.8-flash", migrated.geminiModel)
+        assertEquals("gpt-5.6-luna", migrated.openAiModel)
+        assertEquals("claude-sonnet-5", migrated.anthropicModel)
+        assertEquals("deepseek-v4-flash", migrated.deepSeekModel)
+    }
+
+    @Test fun downloadedLocalAiIsReadyWithoutAnyApiKey() {
+        val local = SecureState(
+            selectedProvider = AiProvider.PORTABLE_LOCAL.name,
+            selectedModel = "Qwen3 0.6B Local",
+        )
+        assertTrue(chatProviderReady(local, PortableModelStatus.READY))
+        assertTrue(!chatProviderReady(local, PortableModelStatus.MISSING))
+        assertTrue(chatProviderReady(SecureState(), PortableModelStatus.MISSING))
     }
 
     @Test fun removedLocalServerSelectionMigratesToAuto() {
