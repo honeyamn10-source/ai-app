@@ -90,7 +90,7 @@ class ProviderConnectionTester @Inject constructor(
                     AiProvider.GEMINI -> testGemini(key, model)
                     AiProvider.OPENAI -> testCompatible(
                         provider, key, model, secureStore.baseUrl(provider),
-                        listOf("gpt-5-mini", "gpt-4.1-mini"),
+                        listOf("gpt-5.6-luna", "gpt-5.6-terra", "gpt-5.6-sol"),
                     )
                     AiProvider.ANTHROPIC -> testAnthropic(key, model)
                     AiProvider.NVIDIA -> testCompatible(
@@ -107,7 +107,7 @@ class ProviderConnectionTester @Inject constructor(
                     )
                     AiProvider.DEEPSEEK -> testCompatible(
                         provider, key, model, secureStore.baseUrl(provider),
-                        listOf("deepseek-chat", "deepseek-reasoner"),
+                        listOf("deepseek-v4-flash"),
                     )
                     AiProvider.CUSTOM -> {
                         val cleanBase = normalizeCompatibleBaseUrl(baseUrl)
@@ -128,14 +128,17 @@ class ProviderConnectionTester @Inject constructor(
 
     private suspend fun testAuto(): ProviderConnectionReport {
         val localStatus = runCatching { onDevice.status() }.getOrDefault(OnDeviceAvailability.UNSUPPORTED)
+        val portableReady = portableLocal.state().status == PortableModelStatus.READY
         val cloud = secureStore.configuredCloudProvider()
         val message = when {
+            portableReady ->
+                "Auto is ready. BYAK will use your downloaded Portable Local AI privately without an API key."
             localStatus == OnDeviceAvailability.AVAILABLE ->
-                "Auto is ready. BYAK will use private Phone AI first and cloud only when you explicitly select it."
+                "Auto is ready. BYAK will use private Phone AI first and cloud only when local AI is unavailable."
             cloud != null ->
-                "Auto is ready. Phone AI is unavailable on this device, so BYAK will use ${cloud.provider.displayName()}."
+                "Auto is ready. Local AI is unavailable, so BYAK will use ${cloud.provider.displayName()}."
             else ->
-                "Auto is selected. This phone does not currently support Phone AI; connect any cloud provider below and BYAK will use it automatically."
+                "Auto is selected. Download Portable Local AI or connect a cloud provider to start chatting."
         }
         return ProviderConnectionReport(
             provider = AiProvider.AUTO,
@@ -185,7 +188,7 @@ class ProviderConnectionTester @Inject constructor(
     private suspend fun testGemini(key: String, requestedModel: String): ProviderConnectionReport {
         val catalogBody = requireSuccess(
             AiProvider.GEMINI,
-            client.get("https://generativelanguage.googleapis.com/v1beta/models") {
+            client.get("${secureStore.baseUrl(AiProvider.GEMINI)}/models") {
                 header("x-goog-api-key", key)
             },
         )
@@ -194,12 +197,16 @@ class ProviderConnectionTester @Inject constructor(
             requested = requestedModel,
             available = models,
             preferred = listOf(
-                "gemini-2.5-flash-lite",
-                "gemini-2.5-flash",
+                "gemini-3.8-flash",
+                "gemini-3.7-flash",
+                "gemini-3.6-flash",
+                "gemini-3.5-flash",
+                "gemini-3.5-flash-lite",
+                "gemini-3.1-flash-lite",
             ),
         )
         val probe = client.post(
-            "https://generativelanguage.googleapis.com/v1beta/models/$resolved:generateContent",
+            "${secureStore.baseUrl(AiProvider.GEMINI)}/models/$resolved:generateContent",
         ) {
             header("x-goog-api-key", key)
             contentType(ContentType.Application.Json)
@@ -224,9 +231,10 @@ class ProviderConnectionTester @Inject constructor(
     }
 
     private suspend fun testAnthropic(key: String, requestedModel: String): ProviderConnectionReport {
+        val base = secureStore.baseUrl(AiProvider.ANTHROPIC)
         val catalogBody = requireSuccess(
             AiProvider.ANTHROPIC,
-            client.get("https://api.anthropic.com/v1/models") {
+            client.get("$base/models") {
                 header("x-api-key", key)
                 header("anthropic-version", "2023-06-01")
             },
@@ -235,9 +243,31 @@ class ProviderConnectionTester @Inject constructor(
         val resolved = resolveModel(
             requested = requestedModel,
             available = models,
-            preferred = listOf("claude-sonnet-4-5", "claude-3-5-haiku-latest"),
+            preferred = listOf("claude-sonnet-5", "claude-haiku-4-5-20251001", "claude-opus-5"),
         )
-        return report(AiProvider.ANTHROPIC, requestedModel, resolved, models)
+        val probe = client.post("$base/messages") {
+            header("x-api-key", key)
+            header("anthropic-version", "2023-06-01")
+            contentType(ContentType.Application.Json)
+            setBody(buildJsonObject {
+                put("model", resolved)
+                put("max_tokens", 16)
+                put("messages", buildJsonArray {
+                    add(buildJsonObject {
+                        put("role", "user")
+                        put("content", "Reply OK")
+                    })
+                })
+            })
+        }
+        val probeBody = probe.bodyAsText().take(MAX_BODY)
+        if (!probe.status.isSuccess() && probe.status.value != 429) {
+            error(providerFailure(AiProvider.ANTHROPIC, probe.status.value, probeBody))
+        }
+        val note = if (probe.status.value == 429) {
+            " The key is valid; its Claude quota is temporarily rate-limited."
+        } else ""
+        return report(AiProvider.ANTHROPIC, requestedModel, resolved, models, note)
     }
 
     private suspend fun requireSuccess(provider: AiProvider, response: HttpResponse): String {
