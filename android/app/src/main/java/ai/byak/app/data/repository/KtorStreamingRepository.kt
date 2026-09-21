@@ -1,6 +1,9 @@
 package ai.byak.app.data.repository
 
+import ai.byak.app.data.localai.OnDeviceAvailability
 import ai.byak.app.data.localai.OnDeviceModelManager
+import ai.byak.app.data.localai.PortableLocalModelManager
+import ai.byak.app.data.localai.PortableModelStatus
 import ai.byak.app.data.security.SecureStore
 import ai.byak.app.domain.model.AiProvider
 import ai.byak.app.domain.model.MessageRole
@@ -45,21 +48,33 @@ class KtorStreamingRepository @Inject constructor(
     private val secureStore: SecureStore,
     private val json: Json,
     private val onDevice: OnDeviceModelManager,
+    private val portableLocal: PortableLocalModelManager,
 ) : StreamingRepository {
     override fun stream(request: StreamingRequest): Flow<StreamChunk> = flow {
-        if (request.provider == AiProvider.ON_DEVICE) {
-            onDevice.stream(request).collect { emit(it) }
-            return@flow
+        val effective = resolveRequest(request)
+        when (effective.provider) {
+            AiProvider.ON_DEVICE -> {
+                onDevice.stream(effective).collect { emit(it) }
+                return@flow
+            }
+            AiProvider.PORTABLE_LOCAL -> {
+                portableLocal.stream(effective).collect { emit(it) }
+                return@flow
+            }
+            else -> Unit
         }
-        val apiKey = secureStore.apiKey(request.provider.name)
-        require(apiKey.isNotBlank()) { "Add your ${request.provider.displayName()} API key in You → AI connection." }
+
+        val apiKey = secureStore.apiKey(effective.provider.name)
+        require(apiKey.isNotBlank()) {
+            "Add your ${effective.provider.displayName()} API key in You → AI connection."
+        }
 
         var retry = 0
         var emittedAny = false
         while (true) {
             try {
                 val fullText = StringBuilder()
-                val endpoint = endpoint(request, apiKey)
+                val endpoint = endpoint(effective, apiKey)
                 client.preparePost(endpoint.url) {
                     contentType(ContentType.Application.Json)
                     accept(ContentType.Text.EventStream)
@@ -75,11 +90,11 @@ class KtorStreamingRepository @Inject constructor(
                                 ?.times(1_000)
                             throw RetryableStreamException(
                                 response.status.value,
-                                providerFailure(request.provider, response.status.value, detail),
+                                providerFailure(effective.provider, response.status.value, detail),
                                 retryAfter,
                             )
                         }
-                        error(providerFailure(request.provider, response.status.value, detail))
+                        error(providerFailure(effective.provider, response.status.value, detail))
                     }
 
                     val channel = response.bodyAsChannel()
@@ -91,9 +106,9 @@ class KtorStreamingRepository @Inject constructor(
                         val eventError = providerMessage(data)
                             .takeIf { data.contains("\"error\"") && it.isNotBlank() }
                         if (eventError != null) {
-                            error(request.provider.displayName() + " stream failed: " + eventError)
+                            error(effective.provider.displayName() + " stream failed: " + eventError)
                         }
-                        val delta = parseDelta(request.provider, data)
+                        val delta = parseDelta(effective.provider, data)
                         if (!delta.isNullOrEmpty()) {
                             emittedAny = true
                             fullText.append(delta)
@@ -115,24 +130,62 @@ class KtorStreamingRepository @Inject constructor(
         }
     }
 
+    private suspend fun resolveRequest(request: StreamingRequest): StreamingRequest {
+        if (request.provider != AiProvider.AUTO && request.provider != AiProvider.ON_DEVICE) return request
+        val portableReady = portableLocal.state().status == PortableModelStatus.READY
+        if (request.provider == AiProvider.AUTO && portableReady) {
+            return request.copy(
+                provider = AiProvider.PORTABLE_LOCAL,
+                model = SecureStore.PORTABLE_LOCAL_MODEL,
+            )
+        }
+        val phoneReady = runCatching { onDevice.status() }
+            .getOrDefault(OnDeviceAvailability.UNSUPPORTED) == OnDeviceAvailability.AVAILABLE
+        if (phoneReady) {
+            return request.copy(provider = AiProvider.ON_DEVICE, model = SecureStore.ON_DEVICE_MODEL)
+        }
+        if (portableReady) {
+            return request.copy(
+                provider = AiProvider.PORTABLE_LOCAL,
+                model = SecureStore.PORTABLE_LOCAL_MODEL,
+            )
+        }
+        val cloud = secureStore.configuredCloudProvider()
+            ?: error(
+                "This phone cannot run Gemini Nano. Download Portable Local AI or connect OpenRouter, Gemini, NVIDIA, Groq, Mistral, DeepSeek, OpenAI, Claude, or a Universal API in You → AI connection.",
+            )
+        return request.copy(provider = cloud.provider, model = cloud.model)
+    }
+
     private fun endpoint(request: StreamingRequest, apiKey: String): Endpoint = when (request.provider) {
         AiProvider.OPENAI -> openAiCompatibleEndpoint(
-            url = "https://api.openai.com/v1/chat/completions",
+            url = "${secureStore.baseUrl(AiProvider.OPENAI)}/chat/completions",
             apiKey = apiKey,
             request = request,
             headers = emptyMap(),
             tokenField = "max_completion_tokens",
+            includeUsage = true,
         )
         AiProvider.OPENROUTER -> openAiCompatibleEndpoint(
-            url = "https://openrouter.ai/api/v1/chat/completions",
+            url = "${secureStore.baseUrl(AiProvider.OPENROUTER)}/chat/completions",
             apiKey = apiKey,
             request = request,
             headers = mapOf(
-                "HTTP-Referer" to "https://byak.ai",
+                "HTTP-Referer" to "https://byak.site.je",
                 "X-OpenRouter-Title" to "BYAK AI",
             ),
             tokenField = "max_tokens",
+            includeUsage = true,
         )
+        AiProvider.NVIDIA, AiProvider.GROQ, AiProvider.MISTRAL, AiProvider.DEEPSEEK, AiProvider.CUSTOM ->
+            openAiCompatibleEndpoint(
+                url = "${secureStore.baseUrl(request.provider)}/chat/completions",
+                apiKey = apiKey,
+                request = request,
+                headers = emptyMap(),
+                tokenField = "max_tokens",
+                includeUsage = false,
+            )
         AiProvider.ANTHROPIC -> Endpoint(
             url = "https://api.anthropic.com/v1/messages",
             headers = mapOf("x-api-key" to apiKey, "anthropic-version" to "2023-06-01"),
@@ -171,7 +224,8 @@ class KtorStreamingRepository @Inject constructor(
                 put("generationConfig", buildJsonObject { put("maxOutputTokens", request.maxTokens) })
             },
         )
-        AiProvider.ON_DEVICE -> error("On-device requests do not use a network endpoint")
+        AiProvider.AUTO, AiProvider.PORTABLE_LOCAL, AiProvider.ON_DEVICE ->
+            error("Local and automatic requests do not use a network endpoint")
     }
 
     private fun openAiCompatibleEndpoint(
@@ -180,13 +234,14 @@ class KtorStreamingRepository @Inject constructor(
         request: StreamingRequest,
         headers: Map<String, String>,
         tokenField: String,
+        includeUsage: Boolean,
     ) = Endpoint(
         url = url,
         headers = mapOf(HttpHeaders.Authorization to "Bearer $apiKey") + headers,
         body = buildJsonObject {
             put("model", request.model)
             put("stream", true)
-            put("stream_options", buildJsonObject { put("include_usage", true) })
+            if (includeUsage) put("stream_options", buildJsonObject { put("include_usage", true) })
             put(tokenField, request.maxTokens)
             put("messages", buildJsonArray {
                 request.systemPrompt?.takeIf(String::isNotBlank)?.let { prompt ->
@@ -205,12 +260,18 @@ class KtorStreamingRepository @Inject constructor(
     private fun parseDelta(provider: AiProvider, data: String): String? {
         val root = runCatching { json.parseToJsonElement(data).jsonObject }.getOrNull() ?: return null
         return when (provider) {
-            AiProvider.OPENAI, AiProvider.OPENROUTER -> root.array("choices")?.firstObject()
+            AiProvider.OPENAI,
+            AiProvider.OPENROUTER,
+            AiProvider.NVIDIA,
+            AiProvider.GROQ,
+            AiProvider.MISTRAL,
+            AiProvider.DEEPSEEK,
+            AiProvider.CUSTOM -> root.array("choices")?.firstObject()
                 ?.objectValue("delta")?.string("content")
             AiProvider.ANTHROPIC -> root.objectValue("delta")?.string("text")
             AiProvider.GEMINI -> root.array("candidates")?.firstObject()
                 ?.objectValue("content")?.array("parts")?.firstObject()?.string("text")
-            AiProvider.ON_DEVICE -> null
+            AiProvider.AUTO, AiProvider.PORTABLE_LOCAL, AiProvider.ON_DEVICE -> null
         }
     }
 
@@ -220,11 +281,20 @@ class KtorStreamingRepository @Inject constructor(
         MessageRole.SYSTEM -> "system"
     }
 
-    private fun urlEncode(value: String): String = URLEncoder.encode(value, StandardCharsets.UTF_8.toString())
+    private fun urlEncode(value: String): String =
+        URLEncoder.encode(value, StandardCharsets.UTF_8.toString())
 
-    private data class Endpoint(val url: String, val headers: Map<String, String>, val body: JsonObject)
-    private class RetryableStreamException(code: Int, detail: String, val retryAfterMillis: Long?) :
-        IllegalStateException(detail.ifBlank { "Temporary provider error $code" })
+    private data class Endpoint(
+        val url: String,
+        val headers: Map<String, String>,
+        val body: JsonObject,
+    )
+
+    private class RetryableStreamException(
+        code: Int,
+        detail: String,
+        val retryAfterMillis: Long?,
+    ) : IllegalStateException(detail.ifBlank { "Temporary provider error $code" })
 
     private companion object {
         const val MAX_RETRIES = 3
