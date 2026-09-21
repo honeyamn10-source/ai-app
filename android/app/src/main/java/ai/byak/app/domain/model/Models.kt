@@ -50,6 +50,7 @@ enum class StepStatus { PENDING, RUNNING, COMPLETE, FAILED }
 enum class MessageRole { USER, ASSISTANT, SYSTEM }
 enum class AiProvider {
     AUTO,
+    PORTABLE_LOCAL,
     ON_DEVICE,
     OPENROUTER,
     GEMINI,
