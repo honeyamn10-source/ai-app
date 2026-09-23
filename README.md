@@ -1,10 +1,14 @@
+![BYAK AI — Android AI workspace](docs/assets/cover.svg)
+
 # BYAK AI
 
 **Bring Your API Key. Bring Your Intelligence.**
 
-BYAK AI is a commercial-grade foundation for a multi-provider Android AI assistant. This repository contains a runnable zero-dependency reference API, a PostgreSQL/pgvector production schema, and a native Kotlin/Jetpack Compose client.
+BYAK AI is a development foundation for a multi-provider Android AI assistant. This repository contains a runnable zero-dependency reference API, a PostgreSQL/pgvector production schema, and a native Kotlin/Jetpack Compose client.
 
-## What works
+This guide describes the default `main` branch. Versioned release work may live on other branches; confirm the branch and its checks before building a store release.
+
+## Implemented components
 
 - Email registration/login, rotating refresh sessions, device revocation and account deletion
 - Server-encrypted BYOK connections with masked credentials
@@ -46,7 +50,7 @@ The reference API uses an encrypted-permissions local JSON store so it runs imme
 ## Run Android
 
 1. Open `android/` in Android Studio.
-2. Use JDK 17 and Android SDK 35.
+2. Use JDK 17, Gradle 8.13 and Android SDK 35. The build uses Kotlin 2.3.0 and Android Gradle Plugin 8.13.2, including Kotlin 2.3-compatible R8.
 3. Start the API, then run the `debug` variant on an emulator. It uses `http://10.0.2.2:8787`.
 4. For a physical device or hosted API, build with:
 
