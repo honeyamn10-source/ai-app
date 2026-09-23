@@ -2,6 +2,20 @@
 
 # BYAK AI
 
+<!-- repo-badges:start -->
+<div align="center">
+
+[![Stars](https://img.shields.io/github/stars/honeyamn10-source/ai-app?style=flat-square&logo=github&label=Stars)](https://github.com/honeyamn10-source/ai-app/stargazers)
+[![Forks](https://img.shields.io/github/forks/honeyamn10-source/ai-app?style=flat-square&logo=github&label=Forks)](https://github.com/honeyamn10-source/ai-app/forks)
+[![Issues](https://img.shields.io/github/issues/honeyamn10-source/ai-app?style=flat-square&logo=github&label=Issues)](https://github.com/honeyamn10-source/ai-app/issues)
+[![Last Commit](https://img.shields.io/github/last-commit/honeyamn10-source/ai-app?style=flat-square&logo=github&label=Last%20Commit)](https://github.com/honeyamn10-source/ai-app/commits/main)
+
+[Repository](https://github.com/honeyamn10-source/ai-app) · [Issues](https://github.com/honeyamn10-source/ai-app/issues) · [Pull Requests](https://github.com/honeyamn10-source/ai-app/pulls) · [Actions](https://github.com/honeyamn10-source/ai-app/actions)
+
+</div>
+<!-- repo-badges:end -->
+
+
 **Bring Your API Key. Bring Your Intelligence.**
 
 BYAK AI is a development foundation for a multi-provider Android AI assistant. This repository contains a runnable zero-dependency reference API, a PostgreSQL/pgvector production schema, and a native Kotlin/Jetpack Compose client.
@@ -98,4 +112,3 @@ BYOK provider charges remain between users and their selected provider. Never re
 ## License
 
 The original BYAK AI code in this repository is proprietary unless the owner selects another license. Third-party dependencies retain their own licenses; see `THIRD_PARTY_NOTICES.md`.
-
