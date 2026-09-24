@@ -34,6 +34,23 @@ BYAK AI is a development foundation for a multi-provider Android AI assistant. T
 
 This guide describes the default `main` branch. Versioned release work may live on other branches; confirm the branch and its checks before building a store release.
 
+<!-- architecture-showcase:start -->
+## Architecture
+
+```mermaid
+flowchart LR
+    A[Android app<br/>Kotlin + Compose] --> B[BYAK API]
+    B --> C[Provider adapters]
+    C --> D[OpenAI-compatible and hosted model providers]
+    B --> E[Research integrations]
+    B --> F[Local development store]
+    B -. production path .-> G[(PostgreSQL + pgvector)]
+    B -. production services .-> H[(Redis / object storage)]
+```
+
+The default repository can run with its local reference store; PostgreSQL, Redis and object storage are production-oriented paths documented in the repository.
+<!-- architecture-showcase:end -->
+
 ## Implemented components
 
 - Email registration/login, rotating refresh sessions, device revocation and account deletion
