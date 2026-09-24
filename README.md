@@ -15,6 +15,18 @@
 </div>
 <!-- repo-badges:end -->
 
+<!-- professional-meta:start -->
+<div align="center">
+
+[![ci](https://github.com/honeyamn10-source/ai-app/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/honeyamn10-source/ai-app/actions/workflows/ci.yml)
+
+![Android](https://img.shields.io/badge/Android-3DDC84?style=flat-square&logo=android&logoColor=white) ![Kotlin](https://img.shields.io/badge/Kotlin-7F52FF?style=flat-square&logo=kotlin&logoColor=white) ![Node.js](https://img.shields.io/badge/Node.js-339933?style=flat-square&logo=nodedotjs&logoColor=white) ![Docker](https://img.shields.io/badge/Docker-2496ED?style=flat-square&logo=docker&logoColor=white)
+
+[Documentation](docs) · [Security](SECURITY.md) · [Third-party notices](THIRD_PARTY_NOTICES.md)
+
+</div>
+<!-- professional-meta:end -->
+
 
 **Bring Your API Key. Bring Your Intelligence.**
 
