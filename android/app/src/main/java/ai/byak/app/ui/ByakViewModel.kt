@@ -190,7 +190,7 @@ class ByakViewModel(private val api: ApiClient, private val billing: BillingMana
     fun changePassword(current: String, new: String, done: () -> Unit) = task("Password changed. Other devices were signed out.") { api.changePassword(current, new); done() }
     suspend fun exportData(): String? = runCatching { api.exportData() }.onFailure { update { copy(error = it.message) } }.getOrNull()
     fun logout() = viewModelScope.launch { stopGeneration(); api.logout() }
-    fun deleteAccount() = task { val notice = api.deleteAccount(); notice?.let { notice(it) } }
+    fun deleteAccount() = task { api.deleteAccount()?.let { message -> notice(message) } }
 
     // ---------- billing ----------
     fun loadPlans(productIds: List<String>) = task {

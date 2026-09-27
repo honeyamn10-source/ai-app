@@ -123,7 +123,7 @@ private val playProducts get() = listOf(BuildConfig.PLAY_MONTHLY_PRODUCT_ID, Bui
         } else item {
             OutlinedButton(onClick = { runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://play.google.com/store/account/subscriptions?sku=${sub.productId.orEmpty()}&package=${context.packageName}"))) } }, Modifier.fillMaxWidth()) { Text("Manage subscription in Google Play") }
         }
-        item { TextButton(onClick = vm::restorePurchases, Modifier.fillMaxWidth(), enabled = !state.busy) { Text("Restore purchases") } }
+        item { TextButton(onClick = { vm.restorePurchases() }, Modifier.fillMaxWidth(), enabled = !state.busy) { Text("Restore purchases") } }
         item { Text("Payment is charged to your Google Play account. Subscriptions renew automatically until cancelled in Google Play. Your provider API usage is billed separately by each provider.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
     }
 }
@@ -143,7 +143,7 @@ private val playProducts get() = listOf(BuildConfig.PLAY_MONTHLY_PRODUCT_ID, Bui
     LaunchedEffect(Unit) { vm.loadMemory() }
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(20.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         item { Text("Memory", fontSize = 25.sp, fontWeight = FontWeight.Black); Text("Facts the AI should always know about you. Only used when memory is on.", color = MaterialTheme.colorScheme.onSurfaceVariant) }
-        item { Card { ListItem(headlineContent = { Text("Use memory in chats", fontWeight = FontWeight.SemiBold) }, supportingContent = { Text(if (state.memoryEnabled) "On" else "Off") }, trailingContent = { Switch(checked = state.memoryEnabled, onCheckedChange = vm::setMemoryEnabled) }) } }
+        item { Card { ListItem(headlineContent = { Text("Use memory in chats", fontWeight = FontWeight.SemiBold) }, supportingContent = { Text(if (state.memoryEnabled) "On" else "Off") }, trailingContent = { Switch(checked = state.memoryEnabled, onCheckedChange = { vm.setMemoryEnabled(it) }) }) } }
         item {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 OutlinedTextField(draft, { draft = it }, Modifier.weight(1f), placeholder = { Text("e.g. I live in Berlin and work in fintech") }, maxLines = 3)
