@@ -1,40 +1,94 @@
 openapi: 3.1.0
-info: { title: BYAK AI API, version: 0.1.0 }
+info: { title: BYAK AI API, version: 0.2.0 }
 servers: [{ url: https://api.example.com }]
 security: [{ bearerAuth: [] }]
 components:
   securitySchemes:
     bearerAuth: { type: http, scheme: bearer, bearerFormat: JWT }
+  parameters:
+    Id: { name: id, in: path, required: true, schema: { type: string, format: uuid } }
   schemas:
-    Error: { type: object, properties: { error: { type: object, properties: { code: { type: string }, message: { type: string }, requestId: { type: string } } } } }
+    Error: { type: object, properties: { error: { type: object, properties: { code: { type: string, description: 'request_error, internal_error, not_found or plan_limit' }, message: { type: string }, requestId: { type: string } } } } }
+    Session: { type: object, properties: { accessToken: { type: string }, refreshToken: { type: string }, expiresIn: { type: integer }, user: { type: object } } }
+    Subscription: { type: object, properties: { plan: { enum: [free, monthly, annual] }, tier: { enum: [free, pro] }, status: { type: string }, expiresAt: { type: [string, 'null'] }, autoRenewing: { type: boolean }, limits: { type: object }, billingAccountId: { type: string, description: 'Pass to Play Billing as obfuscatedAccountId' }, verificationAvailable: { type: boolean } } }
+  responses:
+    PlanLimit: { description: Free plan limit reached (code plan_limit), content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
 paths:
-  /health:
-    get: { security: [], responses: { '200': { description: Healthy } } }
+  /health: { get: { security: [], responses: { '200': { description: Healthy } } } }
+  /v1/config: { get: { security: [], responses: { '200': { description: Plans, product ids and enabled features } } } }
+  /v1/models/catalog: { get: { security: [], responses: { '200': { description: Supported providers and suggested models } } } }
+
   /v1/auth/register:
-    post: { security: [], requestBody: { required: true, content: { application/json: { schema: { type: object, required: [email,password], properties: { name: { type: string }, email: { type: string, format: email }, password: { type: string, minLength: 10 } } } } } }, responses: { '201': { description: Session created }, '409': { description: Existing account } } }
-  /v1/auth/login:
-    post: { security: [], responses: { '200': { description: Authenticated }, '401': { description: Invalid credentials } } }
+    post: { security: [], requestBody: { required: true, content: { application/json: { schema: { type: object, required: [email, password], properties: { name: { type: string }, email: { type: string, format: email }, password: { type: string, minLength: 10 } } } } } }, responses: { '201': { description: Session created, content: { application/json: { schema: { $ref: '#/components/schemas/Session' } } } }, '400': { description: Invalid input }, '409': { description: Existing account } } }
+  /v1/auth/login: { post: { security: [], responses: { '200': { description: Authenticated }, '401': { description: Invalid credentials } } } }
+  /v1/auth/google: { post: { security: [], description: Exchange a Google ID token, responses: { '200': { description: Authenticated } } } }
+  /v1/auth/refresh: { post: { security: [], description: 'Rotates the refresh token. Presenting a superseded refresh token revokes the session.', responses: { '200': { description: New tokens }, '401': { description: Expired or reused } } } }
+  /v1/auth/logout: { post: { responses: { '200': { description: Session revoked } } } }
+  /v1/auth/password: { post: { description: Change password and sign out other devices, responses: { '200': { description: Changed } } } }
+
+  /v1/me:
+    get: { responses: { '200': { description: Profile with subscription } } }
+    patch: { description: Update name and custom instructions, responses: { '200': { description: Updated } } }
+    delete: { responses: { '200': { description: Account deleted } } }
+  /v1/me/export: { get: { responses: { '200': { description: Full JSON export of the user's data } } } }
+  /v1/devices: { get: { responses: { '200': { description: Active sessions } } } }
+  /v1/devices/{id}: { delete: { parameters: [{ $ref: '#/components/parameters/Id' }], responses: { '200': { description: Session revoked } } } }
+
   /v1/providers:
     get: { responses: { '200': { description: Masked provider connections } } }
-    post: { responses: { '201': { description: Encrypted provider connection created } } }
+    post: { responses: { '201': { description: Encrypted provider connection created }, '402': { $ref: '#/components/responses/PlanLimit' } } }
+  /v1/providers/{id}:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    patch: { description: Rename, enable/disable, change default model or rotate the key, responses: { '200': { description: Updated } } }
+    delete: { responses: { '200': { description: Deleted } } }
+  /v1/providers/{id}/validate: { post: { parameters: [{ $ref: '#/components/parameters/Id' }], responses: { '200': { description: Key accepted by the provider } } } }
+  /v1/providers/{id}/models: { get: { parameters: [{ $ref: '#/components/parameters/Id' }], responses: { '200': { description: Models available to this key } } } }
+
   /v1/conversations:
-    get: { responses: { '200': { description: Conversations } } }
+    get: { parameters: [{ name: q, in: query, schema: { type: string } }, { name: projectId, in: query, schema: { type: string } }, { name: archived, in: query, schema: { type: boolean } }], responses: { '200': { description: Conversations, pinned first } } }
     post: { responses: { '201': { description: Conversation created } } }
+  /v1/conversations/{id}:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    get: { responses: { '200': { description: Conversation with messages } } }
+    patch: { description: title, pinned, archived, providerId, projectId, model, responses: { '200': { description: Updated } } }
+    delete: { responses: { '200': { description: Deleted } } }
+  /v1/conversations/{id}/messages: { post: { parameters: [{ $ref: '#/components/parameters/Id' }], description: Non-streaming turn, responses: { '201': { description: Assistant message } } } }
   /v1/conversations/{id}/stream:
     post:
-      parameters: [{ name: id, in: path, required: true, schema: { type: string, format: uuid } }]
+      parameters: [{ $ref: '#/components/parameters/Id' }]
+      description: 'SSE events message_start, content_delta, usage, message_complete, error. Closing the connection stops generation; the partial answer is saved with status "stopped".'
       responses: { '200': { description: SSE stream, content: { text/event-stream: {} } } }
+  /v1/conversations/{id}/regenerate: { post: { parameters: [{ $ref: '#/components/parameters/Id' }], description: Replace the last answer (SSE), responses: { '200': { description: SSE stream, content: { text/event-stream: {} } } } } }
+  /v1/conversations/{id}/messages/{messageId}: { delete: { parameters: [{ $ref: '#/components/parameters/Id' }, { name: messageId, in: path, required: true, schema: { type: string } }], responses: { '200': { description: Deleted } } } }
+  /v1/exports/conversations/{id}: { get: { parameters: [{ $ref: '#/components/parameters/Id' }, { name: format, in: query, schema: { enum: [markdown, txt, json] } }], responses: { '200': { description: Download } } } }
+
   /v1/projects:
-    get: { responses: { '200': { description: Projects } } }
-    post: { responses: { '201': { description: Project created } } }
+    get: { responses: { '200': { description: Projects with counts } } }
+    post: { responses: { '201': { description: Project created }, '402': { $ref: '#/components/responses/PlanLimit' } } }
+  /v1/projects/{id}:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    patch: { responses: { '200': { description: Updated } } }
+    delete: { description: Deletes the project and unlinks its chats and files, responses: { '200': { description: Deleted } } }
+
   /v1/files:
     get: { responses: { '200': { description: Files } } }
-    post: { responses: { '201': { description: File processed }, '415': { description: Unsupported type } } }
-  /v1/research:
-    post: { responses: { '200': { description: Source-attributed results } } }
-  /v1/subscription:
-    get: { responses: { '200': { description: Verified entitlement } } }
-  /v1/me:
-    get: { responses: { '200': { description: Current user } } }
-    delete: { responses: { '200': { description: Account deleted } } }
+    post: { responses: { '201': { description: File processed }, '402': { $ref: '#/components/responses/PlanLimit' }, '413': { description: Too large }, '415': { description: Unsupported type } } }
+  /v1/files/{id}: { delete: { parameters: [{ $ref: '#/components/parameters/Id' }], responses: { '200': { description: Deleted } } } }
+  /v1/files/search: { post: { responses: { '200': { description: Ranked chunks with citations } } } }
 
+  /v1/research: { post: { responses: { '200': { description: Source-attributed results }, '402': { $ref: '#/components/responses/PlanLimit' } } } }
+  /v1/tools/url-reader: { post: { description: Fetch a public HTTPS page as text (private networks blocked), responses: { '200': { description: Page text } } } }
+
+  /v1/memory:
+    get: { responses: { '200': { description: Memory setting and items } } }
+    post: { responses: { '201': { description: Memory saved } } }
+    delete: { responses: { '200': { description: All memory cleared } } }
+  /v1/memory/settings: { put: { responses: { '200': { description: Memory enabled or disabled } } } }
+  /v1/memory/{id}: { delete: { parameters: [{ $ref: '#/components/parameters/Id' }], responses: { '200': { description: Forgotten } } } }
+  /v1/usage: { get: { parameters: [{ name: days, in: query, schema: { type: integer, minimum: 1, maximum: 365 } }], responses: { '200': { description: Token usage by model and day } } } }
+
+  /v1/subscription: { get: { responses: { '200': { description: Effective plan, content: { application/json: { schema: { $ref: '#/components/schemas/Subscription' } } } } } } }
+  /v1/billing/google/verify: { post: { requestBody: { content: { application/json: { schema: { type: object, properties: { purchaseToken: { type: string }, purchaseTokens: { type: array, items: { type: string } } } } } } }, responses: { '200': { description: Verified plan }, '403': { description: Purchase belongs to another account }, '409': { description: Token already linked }, '503': { description: Verification not configured } } } }
+  /v1/billing/google/restore: { post: { description: Same as verify with every owned purchase token, responses: { '200': { description: Verified plan } } } }
+  /v1/billing/google/rtdn: { post: { security: [], parameters: [{ name: token, in: query, required: true, schema: { type: string } }], description: Pub/Sub push endpoint for Google Play real-time developer notifications, responses: { '200': { description: Processed or ignored }, '401': { description: Bad token } } } }
+  /v1/admin/health: { get: { responses: { '200': { description: Aggregate counts (admin only) }, '403': { description: Forbidden } } } }

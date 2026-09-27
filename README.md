@@ -53,23 +53,27 @@ The default repository can run with its local reference store; PostgreSQL, Redis
 
 ## Implemented components
 
-- Email registration/login, rotating refresh sessions, device revocation and account deletion
-- Server-encrypted BYOK connections with masked credentials
-- OpenAI, Anthropic, Gemini, OpenRouter, Groq, Mistral, DeepSeek and custom OpenAI-compatible endpoints
-- Model catalog and remote credential/model validation
-- Conversations, message history and extensible SSE event streaming
-- Project workspaces
-- GitHub, Reddit and configurable Brave web research with source URLs
-- Secure text/Markdown/CSV/JSON upload, chunking, lexical retrieval and document citations
-- User-controlled memory architecture, free entitlements, admin authorization and audit events
-- Markdown, TXT and JSON conversation exports
-- Native Android screens for Home, Chats, Research, Files, Projects, Models and Settings
-- Dark/light themes, adaptive phone/tablet navigation, empty/loading/error states
-- PostgreSQL + pgvector migration, Docker services, CI, tests and security documentation
+**Backend (zero-dependency Node 22 API)**
+- Email + Google Sign-In, rotating refresh tokens with reuse detection, device list/revocation, password change, account deletion and full JSON data export
+- Server-encrypted BYOK connections (AES-256-GCM, masked keys, key rotation) for OpenAI, Anthropic, Gemini, OpenRouter, Groq, Mistral, DeepSeek, custom HTTPS OpenAI-compatible endpoints and (self-hosted) Ollama
+- True token streaming from every provider over SSE; stopping a response keeps the partial answer; regenerate and delete message
+- Prompts combine custom instructions, project instructions, opt-in memory and BM25 document retrieval with citations
+- Conversations with search, pin, archive, rename and move-to-project; Markdown/TXT/JSON exports
+- GitHub, Reddit and Brave web research, SSRF-safe URL reader (DNS-checked, size-capped)
+- Google Play subscriptions: server-side verification, acknowledgement, account binding, upgrades, renewals and real-time developer notifications; Free/Pro plan limits
+- Per-model token usage statistics, audit events, rate limiting, security headers, graceful shutdown
+
+**Android (Kotlin + Jetpack Compose)**
+- Automatic session refresh and Keystore-encrypted token storage
+- Streaming chat with Markdown, stop/regenerate/copy/share, citations and a live model picker
+- Research with one-tap AI summaries, knowledge files, projects with instructions, provider management with key testing
+- BYAK Pro purchase flow with Google Play Billing, restore and subscription management
+- Memory, usage charts, devices, profile and custom instructions, data export
+- Drawer + bottom bar on phones, navigation rail on tablets, dark/light themes
 
 ## Honest release status
 
-This is a tested source deliverable, not a production-signed Play Store release. The Android build requires Android Studio/SDK or the CI workflow. Google OAuth, Google Play purchase verification, PDF/DOCX extraction/export, malware scanning, production object storage, semantic embeddings and provider calls require the corresponding credentials/services. No signing key or API secret is included.
+This is a tested source deliverable, not a production-signed Play Store release. Google Sign-In needs `BYAK_GOOGLE_WEB_CLIENT_ID` (Android) and `GOOGLE_*_CLIENT_ID` (server). Purchases need Play Console products plus `GOOGLE_PLAY_SERVICE_ACCOUNT_JSON` — see [docs/billing/GOOGLE_PLAY_BILLING.md](docs/billing/GOOGLE_PLAY_BILLING.md). PDF/DOCX extraction, malware scanning, object storage and semantic embeddings still need production services. No signing key or API secret is included.
 
 ## Run the API
 
@@ -100,6 +104,8 @@ The reference API uses an encrypted-permissions local JSON store so it runs imme
 ```bash
 gradle -p android -PBYAK_API_URL=https://api.example.com assembleDebug
 ```
+
+Optional build properties (Gradle `-P` or environment variables): `BYAK_GOOGLE_WEB_CLIENT_ID` enables Google Sign-In; `BYAK_PLAY_MONTHLY_PRODUCT_ID` / `BYAK_PLAY_ANNUAL_PRODUCT_ID` override the subscription product ids.
 
 Release bundle (unsigned until your keystore is configured):
 
@@ -132,9 +138,15 @@ docs/                    Architecture, security, API and release guidance
 
 ## Plans
 
-- Free: BYOK, basic chat, research, files and exports
-- Monthly: configurable Play product, suggested price USD $1
-- Annual: configurable Play product, suggested price USD $10
+| | Free | Pro (monthly ≈ $1 / annual ≈ $10) |
+|---|---|---|
+| Provider connections | 3 | 50 |
+| Projects | 3 | 200 |
+| Knowledge files | 25 | 2,000 |
+| Saved memories | 50 | 2,000 |
+| Research searches per day | 50 | 1,000 |
+
+Limits live in `backend/src/billing.mjs`. Prices are set per country in Play Console.
 
 BYOK provider charges remain between users and their selected provider. Never represent a paid third-party model as unlimited or free.
 
