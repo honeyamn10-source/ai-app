@@ -11,10 +11,14 @@ android {
         applicationId = "ai.byak.app"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = 2
+        versionName = "0.2.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
-        buildConfigField("String", "API_BASE_URL", "\"${project.findProperty("BYAK_API_URL") ?: "http://10.0.2.2:8787"}\"")
+        fun prop(name: String, fallback: String) = (project.findProperty(name) as String?)?.takeIf { it.isNotBlank() } ?: System.getenv(name)?.takeIf { it.isNotBlank() } ?: fallback
+        buildConfigField("String", "API_BASE_URL", "\"${prop("BYAK_API_URL", "http://10.0.2.2:8787")}\"")
+        buildConfigField("String", "GOOGLE_WEB_CLIENT_ID", "\"${prop("BYAK_GOOGLE_WEB_CLIENT_ID", "")}\"")
+        buildConfigField("String", "PLAY_MONTHLY_PRODUCT_ID", "\"${prop("BYAK_PLAY_MONTHLY_PRODUCT_ID", "byak_monthly_1")}\"")
+        buildConfigField("String", "PLAY_ANNUAL_PRODUCT_ID", "\"${prop("BYAK_PLAY_ANNUAL_PRODUCT_ID", "byak_annual_10")}\"")
     }
     buildFeatures { compose = true; buildConfig = true }
     buildTypes {
@@ -57,6 +61,7 @@ dependencies {
     implementation("androidx.credentials:credentials-play-services-auth:1.5.0")
     implementation("com.google.android.libraries.identity.googleid:googleid:1.1.1")
     testImplementation("junit:junit:4.13.2")
+    testImplementation("org.json:json:20240303")
     androidTestImplementation("androidx.test.ext:junit:1.2.1")
     androidTestImplementation("androidx.test.espresso:espresso-core:3.6.1")
     androidTestImplementation("androidx.compose.ui:ui-test-junit4")
