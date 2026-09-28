@@ -32,8 +32,9 @@ export const config = Object.freeze({
   play: Object.freeze({
     packageName: env.GOOGLE_PLAY_PACKAGE_NAME || 'ai.byak.app',
     serviceAccountJson: env.GOOGLE_PLAY_SERVICE_ACCOUNT_JSON || '',
-    monthlyProductId: env.PLAY_MONTHLY_PRODUCT_ID || 'monthly',
-    annualProductId: env.PLAY_ANNUAL_PRODUCT_ID || 'yearly',
+    subscriptionProductId: env.PLAY_SUBSCRIPTION_PRODUCT_ID || 'byak_pro',
+    monthlyBasePlanId: env.PLAY_MONTHLY_BASE_PLAN_ID || 'monthly',
+    annualBasePlanId: env.PLAY_ANNUAL_BASE_PLAN_ID || 'yearly',
     rtdnToken: env.GOOGLE_PLAY_RTDN_TOKEN || ''
   }),
   requestId: () => randomBytes(8).toString('hex')
