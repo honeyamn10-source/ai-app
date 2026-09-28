@@ -13,14 +13,14 @@ platform :android do
     track = options[:track].to_s
     fraction = options[:rollout_fraction].to_s
 
-    ui.message("BYAK AI — publishing to track: #{track}")
-    ui.message("Bundle: #{options[:aab_path]}")
+    UI.message("BYAK AI — publishing to track: #{track}")
+    UI.message("Bundle: #{options[:aab_path]}")
 
     # internal has no staged rollout: a single fraction, always 100% of testers.
     staged = %w[alpha beta production].include?(track)
 
     unless staged
-      ui.message("Track '#{track}' is not staged; ignoring rollout_fraction.")
+      UI.message("Track '#{track}' is not staged; ignoring rollout_fraction.")
     end
 
     if staged && fraction.empty?
@@ -42,8 +42,6 @@ platform :android do
       track: track,
       json_key: options[:json_key],
       skip_upload_metadata: true,
-      skip_upload_changelogs: false,
-      changes_not_sent_for_review: true,
       validate_only: false
     }
 
@@ -51,9 +49,21 @@ platform :android do
       supply_options[:rollout_fraction] = fraction
       # Staged release: hand the rollout to Google and let it run.
       supply_options[:status] = "inProgress"
-      ui.message("Staged rollout: status=inProgress rollout_fraction=#{fraction}")
+      UI.message("Staged rollout: status=inProgress rollout_fraction=#{fraction}")
     else
-      ui.message("Full release to '#{track}': status=inProgress")
+      supply_options[:status] = "inProgress"
+      UI.message("Full release to '#{track}': status=inProgress")
+    end
+
+    # Supply requires skip_upload_changelogs:false to be paired with an actual
+    # note, so only send one when the caller supplied it.
+    changes = options[:release_notes].to_s.strip
+    if changes.empty?
+      UI.message("No release notes supplied; uploading the bundle without a changelog note.")
+      supply_options[:skip_upload_changelogs] = true
+    else
+      supply_options[:skip_upload_changelogs] = false
+      supply_options[:release_notes] = changes
     end
 
     supply(supply_options)

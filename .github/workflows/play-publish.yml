@@ -124,16 +124,20 @@ jobs:
             echo "::error::applicationId is '$APPID' but this workflow publishes ai.byak.app."
             exit 1
           fi
-          if [ -z "${MIN_VERSION_CODE:-}" ]; then
-            echo "::warning::BYAK_MIN_VERSION_CODE is not set; skipping the versionCode floor check."
-            exit 0
-          fi
-          if [ "$CODE" -le "$MIN_VERSION_CODE" ]; then
-            echo "::error::versionCode $CODE is not higher than BYAK_MIN_VERSION_CODE ($MIN_VERSION_CODE)."
+          # Fail closed. An unset floor must never allow a duplicate versionCode
+          # to reach Play, so fall back to the documented value rather than skipping.
+          FLOOR="${MIN_VERSION_CODE:-34}"
+          case "$FLOOR" in
+            ''|*[!0-9]*)
+              echo "::error::BYAK_MIN_VERSION_CODE must be a number, got '$FLOOR'."
+              exit 1 ;;
+          esac
+          if [ "$CODE" -le "$FLOOR" ]; then
+            echo "::error::versionCode $CODE is not higher than $FLOOR."
             echo "::error::Google Play rejects a reused or lower versionCode. The release branches in this repo are not on one monotonic version line, so check which branch you are building from, bump versionCode in android/app/build.gradle.kts, and raise BYAK_MIN_VERSION_CODE after a successful upload."
             exit 1
           fi
-          echo "versionCode $CODE > $MIN_VERSION_CODE: OK"
+          echo "versionCode $CODE > $FLOOR: OK"
 
       - name: Verify the bundle is signed with the upload key
         env:
@@ -204,11 +208,14 @@ jobs:
       - name: Publish with fastlane supply
         env:
           JSON_KEY: ${{ runner.temp }}/byak/play-service-account.json
+          # Passed through the environment, never interpolated into the script body.
           CHANGES: ${{ inputs.changes }}
         run: |
           set -euo pipefail
+          printf '%s' "$CHANGES" > "$RUNNER_TEMP/release-notes.txt"
           bundle exec fastlane android publish \
             --track "${{ inputs.track }}" \
             --rollout_fraction "${{ inputs.rollout_fraction }}" \
             --aab_path "$GITHUB_WORKSPACE/dist/app-release.aab" \
-            --json_key "$JSON_KEY"
+            --json_key "$JSON_KEY" \
+            --release_notes "$(cat "$RUNNER_TEMP/release-notes.txt")"

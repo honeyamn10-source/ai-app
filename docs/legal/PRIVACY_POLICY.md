@@ -11,18 +11,32 @@
 
 ## 1. Summary
 
-BYAK AI is a **bring-your-own-key** AI assistant. It does not sell you an AI subscription and
-it does not run a cloud account for you. The app runs on your phone, and BYAK AI's servers are
-not in the path of your conversations.
+BYAK AI is a **bring-your-own-key** AI assistant. It does not sell you an AI subscription.
+
+The app has two modes, and which one you use decides where your data goes.
+
+**On-device mode (the default).** The app runs entirely on your phone. BYAK AI's servers are not
+in the path of your conversations, and BYAK AI operates no cloud account for you. Chats, files,
+projects, memory, prompts, settings and API keys are created and stored on the device. When you ask
+a question, the request goes **directly from your phone to the AI provider you chose**, using the
+key you entered.
+
+**Server mode (optional).** The sign-in screen offers "I have a BYAK server account". If you sign
+in, the app talks to the server you configure instead of handling everything locally, and that
+server — operated by whoever runs it, which may be BYAK AI or a third party — receives your email
+address, conversations, images, files, custom instructions, and any provider API keys you add
+there. If that server is not operated by BYAK AI, its operator is the controller of that data and
+this policy does not govern it. **If you are unsure which mode you are in, do not sign in to a
+server.**
 
 The short version:
 
-- Your chats, files, projects, memory, prompts, settings and API keys are created and stored
-  **on your device**.
-- BYAK AI's developers **do not receive** your prompts, your photos, your files or your API keys.
-- When you ask a question, the app sends the request **directly from your phone to the AI
-  provider you chose**, using the API key you entered. That provider's own privacy policy
-  governs what happens next.
+- In **on-device mode** your chats, files, projects, memory, prompts, settings and API keys stay
+  on your device, and BYAK AI's developers **do not receive** them.
+- In **server mode**, the server you sign in to receives the data listed in section 4. BYAK AI's
+  developers receive it only if they are the operator of that server.
+- In both modes, when you ask a question the app sends the request to the AI provider you chose.
+  That provider's own privacy policy governs what happens next.
 - Purchases are handled entirely by **Google Play**. BYAK AI never sees your card details.
 - You can erase everything BYAK AI stored on your phone at any time, in **Settings**.
 
@@ -68,10 +82,12 @@ transfer) enabled, the operating system may move app data between your own devic
 transfer is governed by your device settings and your device manufacturer's policy, not by this
 one.
 
-## 4. Information BYAK AI's developers do not collect
+## 4. What the developer does not collect, and server mode
 
-BYAK AI's developers operate **no server-side account system for the app**. In particular, the
-developer does not collect or store:
+### 4.1 On-device mode
+
+BYAK AI's developers operate **no server-side account system for the on-device app**. In
+particular, the developer does not collect or store:
 
 - the content of your messages or prompts;
 - the photos, files or documents you attach;
@@ -82,6 +98,27 @@ developer does not collect or store:
 - your advertising ID;
 - microphone, camera, or sensor data in the background;
 - clipboard contents, other than when you explicitly paste into the app.
+
+### 4.2 Server mode
+
+If you choose "I have a BYAK server account" and sign in, the app sends the following to the
+server you configure, over HTTPS, to create and use your account there:
+
+- **Account data** — the email address and password you enter, the display name and custom
+  instructions you set, and your subscription status.
+- **Content** — your conversations and messages, images and file attachments, and projects.
+- **Credentials** — any AI provider API key you add on the server, so the server can call that
+  provider on your behalf.
+- **Technical data** — the app version, device identifiers used to manage your signed-in devices,
+  and server logs such as IP address and timestamps.
+
+The operator of that server is the controller of this data. **BYAK AI's developers receive it only
+if BYAK AI operates the server you signed in to.** If you signed in to a third party's server, that
+third party receives all of the above and its own privacy policy applies. The developer has no
+access to a server you did not configure.
+
+You can delete the server-side copy from the app (**Settings → Account → Delete account**), which
+asks the server to erase your data, or by writing to the server operator directly.
 
 ## 5. Information sent to third parties, and when
 

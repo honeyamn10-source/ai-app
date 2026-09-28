@@ -164,7 +164,7 @@ or of a third party's rights.
 
 ## 14. Privacy and children's privacy
 
-Our [Privacy Policy](PRIVACY_POLICY.md) explains what is stored on your device, what is sent to
+Our [Privacy Policy](privacy.html) explains what is stored on your device, what is sent to
 providers you choose, and how to erase your data. It is part of these Terms.
 
 **BYAK AI is not directed at children and is not intended for anyone under 18.** It relies on
