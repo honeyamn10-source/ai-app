@@ -21,9 +21,9 @@ The Android application never contains administrator provider keys. BYOK values 
 ## Layers
 
 - Client presentation: adaptive Compose UI and observable state.
-- Client data: API client and session persistence. A production hardening pass should encrypt refresh tokens with Android Keystore rather than DataStore alone.
+- Client data: API client with transparent token refresh, Keystore-encrypted session persistence and Play Billing.
 - API boundary: input limits, structured errors, auth, ownership checks and rate limiting.
-- Domain services: provider gateway, research tools, RAG, exports and entitlements.
+- Domain services: streaming provider gateway, research tools, BM25 RAG, memory, exports, usage and Google Play entitlements.
 - Persistence: runnable file repository for local development; PostgreSQL schema for production.
 - Async workers: required production boundary for malware scanning, PDF/DOCX extraction, embeddings and rich exports.
 

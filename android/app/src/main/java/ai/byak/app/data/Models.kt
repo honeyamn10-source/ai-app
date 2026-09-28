@@ -1,10 +1,37 @@
 package ai.byak.app.data
 
 data class Session(val accessToken: String, val refreshToken: String, val name: String, val email: String)
-data class Provider(val id: String, val provider: String, val name: String, val maskedKey: String, val defaultModel: String)
-data class Conversation(val id: String, val title: String, val providerId: String? = null, val model: String = "")
-data class ChatMessage(val id: String, val role: String, val content: String, val pending: Boolean = false)
-data class Project(val id: String, val name: String, val description: String = "")
+data class Provider(val id: String, val provider: String, val name: String, val maskedKey: String, val defaultModel: String, val enabled: Boolean = true, val lastValidatedAt: String? = null)
+data class CatalogProvider(val id: String, val name: String, val models: List<String>, val localOnly: Boolean, val keyOptional: Boolean)
+data class Conversation(
+    val id: String, val title: String, val providerId: String? = null, val model: String = "",
+    val projectId: String? = null, val pinned: Boolean = false, val preview: String = "", val updatedAt: String = ""
+)
+data class Citation(val id: Int, val title: String, val chunk: Int)
+data class ChatMessage(
+    val id: String, val role: String, val content: String, val pending: Boolean = false,
+    val status: String = "complete", val model: String? = null, val citations: List<Citation> = emptyList()
+)
+data class Project(val id: String, val name: String, val description: String = "", val instructions: String = "", val conversationCount: Int = 0, val fileCount: Int = 0)
 data class ResearchResult(val title: String, val url: String, val summary: String)
-data class UserFile(val id: String, val name: String, val mimeType: String, val chunkCount: Int)
+data class UserFile(val id: String, val name: String, val mimeType: String, val chunkCount: Int, val size: Long = 0, val projectId: String? = null)
+data class Memory(val id: String, val content: String)
+data class Device(val id: String, val device: String, val lastUsedAt: String, val current: Boolean)
+data class ModelUsage(val provider: String, val model: String, val requests: Int, val inputTokens: Long, val outputTokens: Long)
+data class DayUsage(val day: String, val requests: Int, val tokens: Long)
+data class Usage(val requests: Int, val inputTokens: Long, val outputTokens: Long, val byModel: List<ModelUsage>, val byDay: List<DayUsage>)
+data class Profile(val name: String, val email: String, val memoryEnabled: Boolean, val customInstructions: String, val hasPassword: Boolean)
+data class Subscription(
+    val plan: String, val tier: String, val status: String, val expiresAt: String?, val autoRenewing: Boolean,
+    val productId: String?, val billingAccountId: String, val verificationAvailable: Boolean, val limits: Map<String, Int>
+) {
+    val isPro get() = tier == "pro"
+    companion object { val FREE = Subscription("free", "free", "active", null, false, null, "", false, emptyMap()) }
+}
 
+/** Events emitted while an answer streams in. */
+sealed interface StreamEvent {
+    data class Delta(val text: String) : StreamEvent
+    data class Complete(val message: ChatMessage) : StreamEvent
+    data class Failed(val message: String) : StreamEvent
+}
