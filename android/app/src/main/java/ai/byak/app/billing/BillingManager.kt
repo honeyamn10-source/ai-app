@@ -165,7 +165,6 @@ class BillingManager @Inject constructor(
                 mutableState.update {
                     it.copy(
                         billingChoiceImageUrl = info.playBillingChoiceImageUrl,
-                        billingChoiceLoyaltyInfo = info.playBillingChoiceLoyaltyInfo,
                     )
                 }
             }
