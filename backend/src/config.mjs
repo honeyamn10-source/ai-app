@@ -9,6 +9,7 @@ if (tokenSecret.length < 32) throw new Error('BYAK_TOKEN_SECRET must be at least
 if (!development && (/^0+$/.test(masterKeyHex) || tokenSecret.startsWith('development-only'))) throw new Error('Production requires real BYAK_MASTER_KEY and BYAK_TOKEN_SECRET values');
 
 const flag = value => ['1', 'true', 'yes'].includes(String(value || '').toLowerCase());
+const defaultGoogleWebClientId = '1077439001893-00b1peg0tcq60bcteadooohsbovdurfs.apps.googleusercontent.com';
 
 export const config = Object.freeze({
   development,
@@ -28,7 +29,7 @@ export const config = Object.freeze({
   historyMessages: Number(env.BYAK_HISTORY_MESSAGES || 40),
   braveKey: env.BRAVE_SEARCH_API_KEY || '',
   githubToken: env.GITHUB_TOKEN || '',
-  googleClientIds: [env.GOOGLE_ANDROID_CLIENT_ID, env.GOOGLE_WEB_CLIENT_ID].filter(Boolean),
+  googleClientIds: [env.GOOGLE_ANDROID_CLIENT_ID, env.GOOGLE_WEB_CLIENT_ID || defaultGoogleWebClientId].filter(Boolean),
   play: Object.freeze({
     packageName: env.GOOGLE_PLAY_PACKAGE_NAME || 'ai.byak.app',
     serviceAccountJson: env.GOOGLE_PLAY_SERVICE_ACCOUNT_JSON || '',
