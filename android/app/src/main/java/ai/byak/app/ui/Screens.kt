@@ -55,12 +55,12 @@ import kotlinx.coroutines.withContext
             items(state.conversations.take(3), key = { "recent-${it.id}" }) { c -> ListItem(headlineContent = { Text(c.title, maxLines = 1, overflow = TextOverflow.Ellipsis) }, supportingContent = { Text(c.preview.ifBlank { c.model }, maxLines = 1, overflow = TextOverflow.Ellipsis) }, leadingContent = { Icon(Icons.Outlined.ChatBubbleOutline, null) }, modifier = Modifier.clickable { vm.openConversation(c); navigate(Destination.Chats) }) }
         }
         item { Text("Quick tools", fontWeight = FontWeight.Bold, fontSize = 19.sp) }
-        items(listOf(Destination.Search to "Research the web, GitHub and Reddit", Destination.Files to "Build a private knowledge base", Destination.Projects to "Workspaces with their own instructions", Destination.Models to "Connect OpenAI, Gemini, Claude and more")) { (dest, subtitle) ->
+        items(listOf(Destination.Search to "Research the web, GitHub and Reddit", Destination.Files to "Build a private knowledge base", Destination.Projects to "Workspaces with their own instructions", Destination.Prompts to "Templates and saved prompts", Destination.Models to "Connect OpenAI, Gemini, Claude and more")) { (dest, subtitle) ->
             ListItem(headlineContent = { Text(dest.title, fontWeight = FontWeight.SemiBold) }, supportingContent = { Text(subtitle) }, leadingContent = { Icon(dest.icon, null, tint = MaterialTheme.colorScheme.primary) }, trailingContent = { Icon(Icons.Outlined.ChevronRight, null) }, modifier = Modifier.clickable { navigate(dest) })
         }
         if (!state.subscription.isPro) item {
             Card(onClick = { navigate(Destination.Plan) }, colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer)) {
-                Row(Modifier.padding(18.dp), verticalAlignment = Alignment.CenterVertically) { Icon(Icons.Outlined.WorkspacePremium, null); Spacer(Modifier.width(14.dp)); Column { Text("Upgrade to BYAK Pro", fontWeight = FontWeight.Bold); Text("More projects, files and research — from $1/month") } }
+                Row(Modifier.padding(18.dp), verticalAlignment = Alignment.CenterVertically) { Icon(Icons.Outlined.WorkspacePremium, null); Spacer(Modifier.width(14.dp)); Column { Text("Upgrade to BYAK Pro", fontWeight = FontWeight.Bold); Text("Web search in chat, photo questions and a longer memory — from $1/month") } }
             }
         }
     }

@@ -2,10 +2,18 @@
 
 package ai.byak.app.ui
 
+import android.content.ActivityNotFoundException
 import android.content.Intent
+import android.net.Uri
+import android.speech.RecognizerIntent
 import ai.byak.app.data.ChatMessage
 import ai.byak.app.data.Conversation
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -14,12 +22,14 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.automirrored.outlined.Send
+import androidx.compose.material.icons.automirrored.outlined.VolumeUp
 import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.AnnotatedString
@@ -81,12 +91,24 @@ import kotlinx.coroutines.launch
     var picking by remember { mutableStateOf(false) }
     var menu by remember { mutableStateOf(false) }
     var renaming by remember { mutableStateOf(false) }
+    var choosingPrompt by remember { mutableStateOf(false) }
     val listState = rememberLazyListState(); val context = LocalContext.current; val scope = rememberCoroutineScope()
     val provider = state.providers.firstOrNull { it.id == conversation.providerId } ?: state.providers.firstOrNull { it.enabled }
     val model = conversation.model.ifBlank { provider?.defaultModel.orEmpty() }
     val lastAssistant = state.messages.lastOrNull()?.takeIf { it.role == "assistant" && !it.pending }
+    val lastUser = state.messages.lastOrNull { it.role == "user" && !it.id.startsWith("local-") }
+    val speaker = rememberSpeaker()
 
     LaunchedEffect(state.messages.size, state.messages.lastOrNull()?.content?.length) { if (state.messages.isNotEmpty()) listState.animateScrollToItem(state.messages.lastIndex) }
+    LaunchedEffect(state.composerPrefill) { state.composerPrefill?.let { draft = it; vm.consumePrefill() } }
+
+    val photoPicker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
+        uri ?: return@rememberLauncherForActivityResult
+        scope.launch { prepareImage(context, uri)?.let(vm::addDraft) ?: vm.reportError("Couldn't read that image") }
+    }
+    val voice = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+        result.data?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)?.firstOrNull()?.let { spoken -> draft = listOf(draft.trimEnd(), spoken).filter { it.isNotBlank() }.joinToString(" ") }
+    }
 
     Column(Modifier.fillMaxSize().imePadding()) {
         Surface(tonalElevation = 2.dp) {
@@ -111,46 +133,111 @@ import kotlinx.coroutines.launch
         }
         LazyColumn(Modifier.weight(1f).fillMaxWidth(), state = listState, contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             if (state.messages.isEmpty() && !state.busy) item {
-                EmptyState(Icons.Outlined.AutoAwesome, "A fresh conversation", "Ask anything. Files in your knowledge base are searched automatically and cited.")
+                EmptyState(Icons.Outlined.AutoAwesome, "A fresh conversation", "Ask anything, attach a photo, or turn on Web for live results. Your files are searched automatically.")
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
                     listOf("Explain a concept simply", "Draft a professional email", "Review my code", "Summarize my documents").forEach { SuggestionChip(onClick = { draft = it }, label = { Text(it) }) }
                 }
             }
-            items(state.messages, key = { it.id }) { message -> MessageBubble(message, canRegenerate = message == lastAssistant && !state.streaming, onRegenerate = vm::regenerate) }
+            items(state.messages, key = { it.id }) { message ->
+                MessageBubble(
+                    message, vm, speaker,
+                    canRegenerate = message == lastAssistant && !state.streaming, canEdit = message == lastUser && !state.streaming,
+                    status = if (message.pending) state.generationStatus else null
+                )
+            }
         }
         Surface(tonalElevation = 4.dp) {
-            Row(Modifier.padding(12.dp), verticalAlignment = Alignment.Bottom) {
-                OutlinedTextField(draft, { draft = it }, Modifier.weight(1f), placeholder = { Text("Message BYAK AI") }, maxLines = 6, shape = RoundedCornerShape(22.dp))
-                Spacer(Modifier.width(8.dp))
-                if (state.streaming) FilledTonalIconButton(onClick = vm::stopGeneration) { Icon(Icons.Outlined.Stop, "Stop generating") }
-                else FilledIconButton(onClick = { val value = draft.trim(); if (value.isNotEmpty()) { draft = ""; vm.send(value) } }, enabled = draft.isNotBlank()) { Icon(Icons.AutoMirrored.Outlined.Send, "Send") }
+            Column(Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
+                state.editing?.let {
+                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                        Icon(Icons.Outlined.Edit, null, Modifier.size(16.dp), tint = MaterialTheme.colorScheme.primary); Spacer(Modifier.width(6.dp))
+                        Text("Editing your message — the answer after it will be replaced", style = MaterialTheme.typography.labelMedium, modifier = Modifier.weight(1f))
+                        TextButton(onClick = { vm.cancelEdit() }) { Text("Cancel") }
+                    }
+                }
+                if (state.drafts.isNotEmpty()) Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(bottom = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    state.drafts.forEach { image ->
+                        Box {
+                            ImageBytes(image.bytes, Modifier.size(64.dp).clip(RoundedCornerShape(12.dp)))
+                            IconButton(onClick = { vm.removeDraft(image) }, Modifier.align(Alignment.TopEnd).size(24.dp)) { Icon(Icons.Outlined.Cancel, "Remove image", tint = MaterialTheme.colorScheme.onSurface) }
+                        }
+                    }
+                }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    val sub = state.subscription; val metered = !sub.isPro && sub.limits.isNotEmpty()
+                    IconButton(onClick = {
+                        if (metered && sub.imagesLeft <= state.drafts.size) vm.showUpgrade("You've used today's ${sub.limits["imagesPerDay"]} free photo questions. They reset at midnight UTC.")
+                        else photoPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+                    }, enabled = state.editing == null && state.drafts.size < 4) {
+                        if (metered) BadgedBox(badge = { Badge { Text("${(sub.imagesLeft - state.drafts.size).coerceAtLeast(0)}") } }) { Icon(Icons.Outlined.AddPhotoAlternate, "Attach image, ${sub.imagesLeft} free today") }
+                        else Icon(Icons.Outlined.AddPhotoAlternate, "Attach image")
+                    }
+                    FilterChip(selected = state.webSearch, onClick = vm::toggleWebSearch, label = { Text(if (metered) "Web · ${sub.webSearchesLeft} left" else "Web") }, leadingIcon = { Icon(Icons.Outlined.Language, null, Modifier.size(16.dp)) })
+                    Spacer(Modifier.width(4.dp))
+                    IconButton(onClick = { vm.loadPrompts(); choosingPrompt = true }) { Icon(Icons.Outlined.AutoStories, "Prompt library") }
+                    Spacer(Modifier.weight(1f))
+                    IconButton(onClick = {
+                        try { voice.launch(Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM).putExtra(RecognizerIntent.EXTRA_PROMPT, "Speak your message")) }
+                        catch (e: ActivityNotFoundException) { vm.reportError("Voice input isn't available on this device") }
+                    }) { Icon(Icons.Outlined.Mic, "Voice input") }
+                }
+                Row(verticalAlignment = Alignment.Bottom) {
+                    OutlinedTextField(draft, { draft = it }, Modifier.weight(1f), placeholder = { Text(if (state.drafts.isNotEmpty()) "Ask about the image" else "Message BYAK AI") }, maxLines = 6, shape = RoundedCornerShape(22.dp))
+                    Spacer(Modifier.width(8.dp))
+                    val canSend = draft.isNotBlank() || (state.drafts.isNotEmpty() && state.editing == null)
+                    if (state.streaming) FilledTonalIconButton(onClick = vm::stopGeneration) { Icon(Icons.Outlined.Stop, "Stop generating") }
+                    else FilledIconButton(onClick = { val value = draft.trim(); if (canSend) { draft = ""; vm.send(value) } }, enabled = canSend) { Icon(Icons.AutoMirrored.Outlined.Send, "Send") }
+                }
             }
         }
     }
     if (picking) ModelPickerDialog(state, vm, conversation.providerId ?: provider?.id, model, onDismiss = { picking = false }) { providerId, chosen -> vm.setConversationModel(providerId, chosen); picking = false }
     if (renaming) TextInputDialog("Rename chat", conversation.title, "Title", onDismiss = { renaming = false }) { vm.renameConversation(conversation.id, it); renaming = false }
+    if (choosingPrompt) PromptPickerDialog(state, onDismiss = { choosingPrompt = false }) { prompt -> draft = prompt.composerText; choosingPrompt = false }
 }
 
-@Composable private fun MessageBubble(message: ChatMessage, canRegenerate: Boolean, onRegenerate: () -> Unit) {
-    val user = message.role == "user"; val clipboard = LocalClipboardManager.current
+@Composable private fun MessageBubble(message: ChatMessage, vm: ByakViewModel, speaker: Speaker, canRegenerate: Boolean, canEdit: Boolean, status: String?) {
+    val user = message.role == "user"; val clipboard = LocalClipboardManager.current; val context = LocalContext.current
     Row(Modifier.fillMaxWidth(), horizontalArrangement = if (user) Arrangement.End else Arrangement.Start) {
         Surface(color = if (user) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant, contentColor = if (user) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant, shape = RoundedCornerShape(20.dp), modifier = Modifier.widthIn(max = 680.dp)) {
-            Column(Modifier.padding(start = 14.dp, end = 14.dp, top = 12.dp, bottom = if (user) 12.dp else 4.dp)) {
+            Column(Modifier.padding(start = 14.dp, end = 14.dp, top = 12.dp, bottom = if (user && !canEdit) 12.dp else 4.dp)) {
                 Text(if (user) "You" else listOfNotNull("BYAK AI", message.model).joinToString(" · "), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
                 Spacer(Modifier.height(4.dp))
+                if (message.localImages.isNotEmpty() || message.attachments.isNotEmpty()) Row(Modifier.padding(bottom = 6.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    message.localImages.forEach { ImageBytes(it.bytes, Modifier.size(120.dp).clip(RoundedCornerShape(12.dp))) }
+                    message.attachments.forEach { ref ->
+                        val bytes by produceState<ByteArray?>(null, message.id, ref.index) { value = vm.attachment(message.id, ref.index) }
+                        val loaded = bytes
+                        if (loaded != null) ImageBytes(loaded, Modifier.size(120.dp).clip(RoundedCornerShape(12.dp)))
+                        else Box(Modifier.size(120.dp).clip(RoundedCornerShape(12.dp)), contentAlignment = Alignment.Center) { Icon(Icons.Outlined.Image, "Image") }
+                    }
+                }
                 when {
-                    message.pending && message.content.isEmpty() -> Text("Thinking…")
-                    user -> Text(message.content)
+                    message.pending && message.content.isEmpty() -> Text(status ?: "Thinking…")
+                    user -> if (message.content.isNotBlank()) Text(message.content)
                     else -> MarkdownText(message.content)
                 }
                 if (message.pending) LinearProgressIndicator(Modifier.fillMaxWidth().padding(top = 8.dp))
                 if (message.status == "stopped") Text("Stopped", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(top = 4.dp))
                 if (message.citations.isNotEmpty()) FlowRow(Modifier.padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    message.citations.forEach { AssistChip(onClick = {}, label = { Text("[${it.id}] ${it.title}", maxLines = 1, overflow = TextOverflow.Ellipsis) }, leadingIcon = { Icon(Icons.Outlined.Description, null, Modifier.size(14.dp)) }) }
+                    message.citations.forEach { citation ->
+                        val web = citation.kind == "web" && citation.url != null
+                        AssistChip(
+                            onClick = { if (web) runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(citation.url))) } },
+                            label = { Text("${if (web) "Web" else "Doc"} ${citation.id} · ${citation.title}", maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                            leadingIcon = { Icon(if (web) Icons.Outlined.Language else Icons.Outlined.Description, null, Modifier.size(14.dp)) }
+                        )
+                    }
                 }
                 if (!user && !message.pending) Row {
                     IconButton(onClick = { clipboard.setText(AnnotatedString(message.content)) }, Modifier.size(36.dp)) { Icon(Icons.Outlined.ContentCopy, "Copy", Modifier.size(18.dp)) }
-                    if (canRegenerate) IconButton(onClick = onRegenerate, Modifier.size(36.dp)) { Icon(Icons.Outlined.Replay, "Regenerate", Modifier.size(18.dp)) }
+                    IconButton(onClick = { speaker.toggle(message.id, message.content) }, Modifier.size(36.dp)) {
+                        Icon(if (speaker.speakingId == message.id) Icons.Outlined.StopCircle else Icons.AutoMirrored.Outlined.VolumeUp, if (speaker.speakingId == message.id) "Stop reading" else "Read aloud", Modifier.size(18.dp))
+                    }
+                    if (canRegenerate) IconButton(onClick = vm::regenerate, Modifier.size(36.dp)) { Icon(Icons.Outlined.Replay, "Regenerate", Modifier.size(18.dp)) }
+                }
+                if (user && canEdit) Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                    IconButton(onClick = { vm.startEdit(message) }, Modifier.size(32.dp)) { Icon(Icons.Outlined.Edit, "Edit message", Modifier.size(16.dp)) }
                 }
             }
         }

@@ -18,19 +18,21 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.io.IOException
 import java.net.URLEncoder
+import java.util.Base64
 import java.util.concurrent.TimeUnit
 
 class ApiException(message: String, val status: Int, val code: String? = null) : Exception(message)
 
-class ApiClient(baseUrl: String, private val sessions: SessionStore) {
-    private val base = baseUrl.trimEnd('/')
+/** The server address comes from [SettingsStore] on every call, so changing it in the app takes effect immediately. */
+class ApiClient(private val settings: SettingsStore, private val sessions: SessionStore) {
+    private suspend fun base(): String = settings.currentServerUrl().trimEnd('/')
     private val jsonType = "application/json; charset=utf-8".toMediaType()
     private val client = OkHttpClient.Builder().connectTimeout(15, TimeUnit.SECONDS).readTimeout(120, TimeUnit.SECONDS).build()
     private val streamClient = client.newBuilder().readTimeout(0, TimeUnit.SECONDS).build()
     private val refreshLock = Mutex()
 
-    private fun build(path: String, method: String, body: JSONObject?, token: String?, accept: String = "application/json"): Request {
-        val builder = Request.Builder().url("$base$path").header("Accept", accept)
+    private fun build(url: String, method: String, body: JSONObject?, token: String?, accept: String = "application/json"): Request {
+        val builder = Request.Builder().url(url).header("Accept", accept)
         token?.let { builder.header("Authorization", "Bearer $it") }
         val payload = (body ?: JSONObject()).toString().toRequestBody(jsonType)
         when (method) {
@@ -50,20 +52,26 @@ class ApiClient(baseUrl: String, private val sessions: SessionStore) {
         return ApiException(message, response.code, error?.optString("code")?.ifBlank { null })
     }
 
-    /** Executes a request; on 401 refreshes the session once and retries. */
-    private suspend fun execute(path: String, method: String = "GET", body: JSONObject? = null, authenticated: Boolean = true): String = withContext(Dispatchers.IO) {
-        suspend fun attempt(token: String?): Pair<Response, String> {
-            val response = try { client.newCall(build(path, method, body, token)).execute() } catch (e: IOException) { throw ApiException("Can't reach the BYAK server. Check your connection.", 0) }
-            return response to response.use { it.body?.string().orEmpty() }
+    /** Executes a request; on 401 refreshes the session once and retries. Returns the raw body bytes. */
+    private suspend fun executeBytes(path: String, method: String = "GET", body: JSONObject? = null, authenticated: Boolean = true): ByteArray = withContext(Dispatchers.IO) {
+        val url = "${base()}$path"
+        suspend fun attempt(token: String?): Pair<Response, ByteArray> {
+            val response = try { client.newCall(build(url, method, body, token)).execute() }
+                catch (e: IllegalArgumentException) { throw ApiException("The server address \"${base()}\" isn't valid. Change it in Settings → Server.", 0) }
+                catch (e: IOException) { throw ApiException("Can't reach the BYAK server at ${base()}. Check your connection or the server address.", 0) }
+            return response to response.use { it.body?.bytes() ?: ByteArray(0) }
         }
         val token = if (authenticated) sessions.current()?.accessToken else null
-        var (response, text) = attempt(token)
+        var (response, bytes) = attempt(token)
         if (authenticated && response.code == 401 && refreshSession(token)) {
-            val retried = attempt(sessions.current()?.accessToken); response = retried.first; text = retried.second
+            val retried = attempt(sessions.current()?.accessToken); response = retried.first; bytes = retried.second
         }
-        if (!response.isSuccessful) throw failure(response, text)
-        text
+        if (!response.isSuccessful) throw failure(response, bytes.toString(Charsets.UTF_8))
+        bytes
     }
+
+    private suspend fun execute(path: String, method: String = "GET", body: JSONObject? = null, authenticated: Boolean = true): String =
+        executeBytes(path, method, body, authenticated).toString(Charsets.UTF_8)
 
     private suspend fun request(path: String, method: String = "GET", body: JSONObject? = null, authenticated: Boolean = true): JSONObject =
         execute(path, method, body, authenticated).let { if (it.isBlank()) JSONObject() else JSONObject(it) }
@@ -72,7 +80,7 @@ class ApiClient(baseUrl: String, private val sessions: SessionStore) {
     private suspend fun refreshSession(staleAccessToken: String?): Boolean = refreshLock.withLock {
         val current = sessions.current() ?: return false
         if (current.accessToken != staleAccessToken) return true
-        val response = try { client.newCall(build("/v1/auth/refresh", "POST", JSONObject().put("refreshToken", current.refreshToken), null)).execute() } catch (e: IOException) { return false }
+        val response = try { client.newCall(build("${base()}/v1/auth/refresh", "POST", JSONObject().put("refreshToken", current.refreshToken), null)).execute() } catch (e: Exception) { return false }
         val text = response.use { it.body?.string().orEmpty() }
         if (!response.isSuccessful) { if (response.code == 401) sessions.clear(); return false }
         val data = JSONObject(text)
@@ -134,21 +142,29 @@ class ApiClient(baseUrl: String, private val sessions: SessionStore) {
     suspend fun messages(id: String): List<ChatMessage> = request("/v1/conversations/${id.enc()}").getJSONArray("messages").objects().map { it.toMessage() }
     suspend fun exportConversation(id: String): String = execute("/v1/exports/conversations/${id.enc()}?format=markdown")
 
-    fun streamMessage(conversationId: String, content: String, providerId: String?, model: String?): Flow<StreamEvent> {
-        val body = JSONObject().put("content", content); providerId?.let { body.put("providerId", it) }; model?.takeIf { it.isNotBlank() }?.let { body.put("model", it) }
+    fun streamMessage(conversationId: String, content: String, providerId: String?, model: String?, images: List<ImageDraft> = emptyList(), webSearch: Boolean = false): Flow<StreamEvent> {
+        val body = generationBody(providerId, model, webSearch).put("content", content)
+        if (images.isNotEmpty()) body.put("attachments", JSONArray(images.map { JSONObject().put("type", "image").put("mimeType", it.mimeType).put("data", Base64.getEncoder().encodeToString(it.bytes)) }))
         return stream("/v1/conversations/${conversationId.enc()}/stream", body)
     }
-    fun regenerate(conversationId: String, providerId: String?, model: String?): Flow<StreamEvent> {
+    fun regenerate(conversationId: String, providerId: String?, model: String?, webSearch: Boolean = false): Flow<StreamEvent> =
+        stream("/v1/conversations/${conversationId.enc()}/regenerate", generationBody(providerId, model, webSearch))
+    fun editMessage(conversationId: String, messageId: String, content: String, providerId: String?, model: String?, webSearch: Boolean = false): Flow<StreamEvent> =
+        stream("/v1/conversations/${conversationId.enc()}/edit", generationBody(providerId, model, webSearch).put("messageId", messageId).put("content", content))
+    private fun generationBody(providerId: String?, model: String?, webSearch: Boolean): JSONObject {
         val body = JSONObject(); providerId?.let { body.put("providerId", it) }; model?.takeIf { it.isNotBlank() }?.let { body.put("model", it) }
-        return stream("/v1/conversations/${conversationId.enc()}/regenerate", body)
+        if (webSearch) body.put("webSearch", true)
+        return body
     }
+    suspend fun attachment(conversationId: String, messageId: String, index: Int): ByteArray =
+        executeBytes("/v1/conversations/${conversationId.enc()}/messages/${messageId.enc()}/attachments/$index")
 
     /** Streams SSE events. Cancelling the collector cancels the HTTP call, which tells the server to stop generating. */
     private fun stream(path: String, body: JSONObject): Flow<StreamEvent> = flow {
         var token = sessions.current()?.accessToken ?: throw ApiException("Sign in required", 401)
         var response: Response? = null
         for (attempt in 0..1) {
-            val call = streamClient.newCall(build(path, "POST", body, token, "text/event-stream"))
+            val call = streamClient.newCall(build("${base()}$path", "POST", body, token, "text/event-stream"))
             val job = currentCoroutineContext()[Job]
             val handle = job?.invokeOnCompletion { call.cancel() }
             val current = try { call.execute() } catch (e: IOException) { handle?.dispose(); throw ApiException("Can't reach the BYAK server. Check your connection.", 0) }
@@ -185,6 +201,19 @@ class ApiClient(baseUrl: String, private val sessions: SessionStore) {
     }
     suspend fun deleteFile(id: String) { request("/v1/files/${id.enc()}", "DELETE") }
 
+    // ---------- prompt library ----------
+    suspend fun prompts(): Pair<List<SavedPrompt>, List<SavedPrompt>> {
+        val data = request("/v1/prompts")
+        val mine = data.getJSONArray("items").objects().map { SavedPrompt(it.getString("id"), it.getString("title"), it.getString("content")) }
+        val templates = data.optJSONArray("templates")?.objects().orEmpty().map { SavedPrompt(it.getString("id"), it.getString("title"), it.getString("content"), it.optString("category"), builtIn = true) }
+        return mine to templates
+    }
+    suspend fun savePrompt(id: String?, title: String, content: String) {
+        val body = JSONObject().put("title", title).put("content", content)
+        if (id == null) request("/v1/prompts", "POST", body) else request("/v1/prompts/${id.enc()}", "PATCH", body)
+    }
+    suspend fun deletePrompt(id: String) { request("/v1/prompts/${id.enc()}", "DELETE") }
+
     // ---------- memory, usage, billing ----------
     suspend fun memory(): Pair<Boolean, List<Memory>> { val data = request("/v1/memory"); return data.optBoolean("enabled") to data.getJSONArray("items").objects().map { Memory(it.getString("id"), it.getString("content")) } }
     suspend fun setMemoryEnabled(enabled: Boolean) { request("/v1/memory/settings", "PUT", JSONObject().put("enabled", enabled)) }
@@ -213,5 +242,8 @@ private fun JSONObject.toProject() = Project(getString("id"), getString("name"),
 private fun JSONObject.toFile() = UserFile(getString("id"), getString("name"), optString("mimeType"), optInt("chunkCount"), optLong("size"), nullableString("projectId"))
 internal fun JSONObject.toSubscription(): Subscription {
     val limits = optJSONObject("limits")?.let { json -> json.keys().asSequence().associateWith { json.optInt(it) } }.orEmpty()
-    return Subscription(optString("plan", "free"), optString("tier", "free"), optString("status", "active"), nullableString("expiresAt"), optBoolean("autoRenewing"), nullableString("productId"), optString("billingAccountId"), optBoolean("verificationAvailable"), limits)
+    val usage = optJSONObject("usageToday")
+    val highlights = optJSONArray("highlights")?.objects().orEmpty().map { ProHighlight(it.optString("key"), it.optString("title"), it.optString("free"), it.optString("pro")) }
+    return Subscription(optString("plan", "free"), optString("tier", "free"), optString("status", "active"), nullableString("expiresAt"), optBoolean("autoRenewing"), nullableString("productId"), optString("billingAccountId"), optBoolean("verificationAvailable"), limits,
+        usage?.optInt("webSearches") ?: 0, usage?.optInt("images") ?: 0, highlights)
 }

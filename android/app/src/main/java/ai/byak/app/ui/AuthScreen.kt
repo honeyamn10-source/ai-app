@@ -2,6 +2,7 @@ package ai.byak.app.ui
 
 import ai.byak.app.auth.GoogleSignIn
 import ai.byak.app.data.ApiClient
+import ai.byak.app.data.SettingsStore
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -25,7 +26,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.launch
 
-@Composable fun AuthScreen(api: ApiClient) {
+@Composable fun AuthScreen(api: ApiClient, settings: SettingsStore) {
+    val server by settings.serverUrl.collectAsState(initial = "")
+    var editingServer by remember { mutableStateOf(false) }
     var register by remember { mutableStateOf(false) }
     var name by remember { mutableStateOf("") }; var email by remember { mutableStateOf("") }; var password by remember { mutableStateOf("") }
     var showPassword by remember { mutableStateOf(false) }
@@ -59,7 +62,9 @@ import kotlinx.coroutines.launch
                 }, Modifier.fillMaxWidth(), enabled = !busy) { Icon(Icons.Outlined.AccountCircle, null); Spacer(Modifier.width(8.dp)); Text("Continue with Google") }
                 TextButton(onClick = { register = !register; error = null }, Modifier.align(Alignment.CenterHorizontally)) { Text(if (register) "Already registered? Sign in" else "New here? Create account") }
                 Text("Your provider keys are encrypted on the server and never stored in the app.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                TextButton(onClick = { editingServer = true }, Modifier.align(Alignment.CenterHorizontally)) { Icon(Icons.Outlined.Dns, null, Modifier.size(16.dp)); Spacer(Modifier.width(6.dp)); Text("Server: ${server.removePrefix("https://").removePrefix("http://").ifBlank { "not set" }}", style = MaterialTheme.typography.labelMedium) }
             }
         }
     }
+    if (editingServer) ServerDialog(server, settings, onDismiss = { editingServer = false }) { editingServer = false }
 }

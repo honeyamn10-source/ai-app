@@ -1,9 +1,12 @@
 package ai.byak.app.ui.theme
 
+import android.os.Build
+import ai.byak.app.data.ThemeMode
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 
 private val Dark = darkColorScheme(
     primary = Color(0xFF8B7CFF), secondary = Color(0xFF43D9B8), tertiary = Color(0xFFFFB45E),
@@ -16,7 +19,15 @@ private val Light = lightColorScheme(
     onBackground = Color(0xFF171620), onSurface = Color(0xFF171620)
 )
 
-@Composable fun ByakTheme(dark: Boolean = isSystemInDarkTheme(), content: @Composable () -> Unit) {
-    MaterialTheme(colorScheme = if (dark) Dark else Light, typography = Typography(), content = content)
-}
+val dynamicColorSupported: Boolean get() = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
 
+@Composable fun ByakTheme(mode: ThemeMode = ThemeMode.System, dynamicColor: Boolean = false, content: @Composable () -> Unit) {
+    val dark = when (mode) { ThemeMode.System -> isSystemInDarkTheme(); ThemeMode.Light -> false; ThemeMode.Dark -> true }
+    val context = LocalContext.current
+    val scheme = when {
+        dynamicColor && dynamicColorSupported -> if (dark) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
+        dark -> Dark
+        else -> Light
+    }
+    MaterialTheme(colorScheme = scheme, typography = Typography(), content = content)
+}

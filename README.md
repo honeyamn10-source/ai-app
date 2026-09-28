@@ -56,7 +56,8 @@ The default repository can run with its local reference store; PostgreSQL, Redis
 **Backend (zero-dependency Node 22 API)**
 - Email + Google Sign-In, rotating refresh tokens with reuse detection, device list/revocation, password change, account deletion and full JSON data export
 - Server-encrypted BYOK connections (AES-256-GCM, masked keys, key rotation) for OpenAI, Anthropic, Gemini, OpenRouter, Groq, Mistral, DeepSeek, custom HTTPS OpenAI-compatible endpoints and (self-hosted) Ollama
-- True token streaming from every provider over SSE; stopping a response keeps the partial answer; regenerate and delete message
+- True token streaming from every provider over SSE; stopping a response keeps the partial answer; regenerate, edit & resend, delete message
+- Image attachments for vision models, web search in chat and automatic link reading with citations, prompt library with built-in templates
 - Prompts combine custom instructions, project instructions, opt-in memory and BM25 document retrieval with citations
 - Conversations with search, pin, archive, rename and move-to-project; Markdown/TXT/JSON exports
 - GitHub, Reddit and Brave web research, SSRF-safe URL reader (DNS-checked, size-capped)
@@ -65,7 +66,9 @@ The default repository can run with its local reference store; PostgreSQL, Redis
 
 **Android (Kotlin + Jetpack Compose)**
 - Automatic session refresh and Keystore-encrypted token storage
-- Streaming chat with Markdown, stop/regenerate/copy/share, citations and a live model picker
+- Streaming chat with Markdown, stop/regenerate/edit/copy/share, citations and a live model picker
+- Photo attachments, voice input, read-aloud answers, a Web toggle and a prompt library
+- Appearance (system/light/dark, Material You) and a configurable server address
 - Research with one-tap AI summaries, knowledge files, projects with instructions, provider management with key testing
 - BYAK Pro purchase flow with Google Play Billing, restore and subscription management
 - Memory, usage charts, devices, profile and custom instructions, data export
@@ -140,11 +143,18 @@ docs/                    Architecture, security, API and release guidance
 
 | | Free | Pro (monthly ≈ $1 / annual ≈ $10) |
 |---|---|---|
-| Provider connections | 3 | 50 |
+| Live web search in chat | 3 per day | 200 per day |
+| Photo questions (vision) | 5 images per day | 500 per day |
+| Conversation memory sent to the model | last 20 messages | last 100 messages |
+| Document excerpts per answer | 4 | 10 |
 | Projects | 3 | 200 |
 | Knowledge files | 25 | 2,000 |
+| Saved prompts | 5 | 200 |
 | Saved memories | 50 | 2,000 |
 | Research searches per day | 50 | 1,000 |
+| Provider connections | 3 | 50 |
+
+Limits are enforced by the API, not the app. Daily allowances reset at midnight UTC. To offer a free trial, add a free-trial offer to each subscription's base plan in Play Console; the app picks it up automatically for eligible users.
 
 Limits live in `backend/src/billing.mjs`. Prices are set per country in Play Console.
 

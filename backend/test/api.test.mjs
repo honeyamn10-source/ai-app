@@ -4,6 +4,7 @@ import { once } from 'node:events';
 import { isolateStore, mockFetch, readSse, sseResponse } from './helpers.mjs';
 
 isolateStore();
+process.env.BRAVE_SEARCH_API_KEY = 'test-brave-key';
 const { server } = await import('../src/server.mjs');
 const fake = mockFetch();
 
@@ -190,4 +191,119 @@ test('disconnecting mid-stream stops generation and keeps the partial answer', a
   await new Promise(r => setTimeout(r, 50));
   const stored = await json(`/v1/conversations/${conversation.id}`, { token }).then(r => r.json());
   assert.equal(stored.messages.at(-1).content, 'Partial answer'); assert.equal(stored.messages.at(-1).status, 'stopped');
+});
+
+const PNG = Buffer.from('89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4890000000a49444154789c6360000000020001e221bc330000000049454e44ae426082', 'hex').toString('base64');
+async function chatWith(provider, apiKey) {
+  const { accessToken: token } = await account();
+  const p = await json('/v1/providers', { method: 'POST', token, body: { provider, apiKey } }).then(r => r.json());
+  const conversation = await json('/v1/conversations', { method: 'POST', token, body: { providerId: p.id } }).then(r => r.json());
+  return { token, conversation };
+}
+const openaiOk = text => () => sseResponse([{ choices: [{ delta: { content: text } }] }, '[DONE]']);
+
+test('images are sent to vision models and stored without leaking bytes in message lists', async () => {
+  fake.on('https://api.openai.com/v1/chat/completions', openaiOk('A tiny image'));
+  const { token, conversation } = await chatWith('openai', 'sk-test-1234567890');
+  const events = await readSse(await json(`/v1/conversations/${conversation.id}/stream`, { method: 'POST', token, body: { content: 'What is this?', attachments: [{ type: 'image', mimeType: 'image/png', data: PNG }] } }));
+  assert.equal(events.find(e => e.event === 'message_complete').data.content, 'A tiny image');
+  const sent = fake.calls.at(-1).body.messages.at(-1);
+  assert.equal(sent.content[0].text, 'What is this?'); assert.equal(sent.content[1].image_url.url, `data:image/png;base64,${PNG}`);
+
+  const stored = await json(`/v1/conversations/${conversation.id}`, { token }).then(r => r.json());
+  const userMessage = stored.messages[0];
+  assert.deepEqual(userMessage.attachments, [{ index: 0, type: 'image', mimeType: 'image/png', size: Buffer.from(PNG, 'base64').length }]);
+  assert.ok(!JSON.stringify(stored).includes(PNG));
+  const image = await json(`/v1/conversations/${conversation.id}/messages/${userMessage.id}/attachments/0`, { token });
+  assert.equal(image.headers.get('content-type'), 'image/png'); assert.equal(Buffer.from(await image.arrayBuffer()).toString('base64'), PNG);
+
+  // Only the message being answered carries image bytes; older images become a short note.
+  await readSse(await json(`/v1/conversations/${conversation.id}/stream`, { method: 'POST', token, body: { content: 'And now?' } }));
+  const followUp = fake.calls.at(-1).body.messages;
+  assert.match(followUp[1].content, /1 image\(s\) were attached/); assert.equal(followUp.at(-1).content, 'And now?');
+});
+
+test('image formats for Anthropic and validation errors', async () => {
+  fake.on('https://api.anthropic.com/v1/messages', () => sseResponse([{ type: 'content_block_delta', delta: { type: 'text_delta', text: 'ok' } }]));
+  const { token, conversation } = await chatWith('anthropic', 'sk-ant-123456789');
+  await json(`/v1/conversations/${conversation.id}/messages`, { method: 'POST', token, body: { content: '', attachments: [{ type: 'image', mimeType: 'image/png', data: PNG }] } });
+  const content = fake.calls.at(-1).body.messages[0].content;
+  assert.deepEqual(content[0], { type: 'image', source: { type: 'base64', media_type: 'image/png', data: PNG } }); assert.equal(content[1].type, 'text');
+  const post = body => json(`/v1/conversations/${conversation.id}/messages`, { method: 'POST', token, body });
+  assert.equal((await post({ content: 'x', attachments: [{ type: 'image', mimeType: 'image/svg+xml', data: PNG }] })).status, 415);
+  assert.equal((await post({ content: 'x', attachments: Array(5).fill({ type: 'image', mimeType: 'image/png', data: PNG }) })).status, 400);
+  assert.equal((await post({ content: 'x', attachments: 'nope' })).status, 400);
+});
+
+test('web search results and links become cited context', async () => {
+  fake.on('https://api.search.brave.com/', () => Response.json({ web: { results: [{ title: 'Launch news', url: 'https://news.example/launch', description: 'BYAK 2.0 launched today' }] } }));
+  fake.on('https://api.openai.com/v1/chat/completions', openaiOk('It launched today [Web source 1]'));
+  const { token, conversation } = await chatWith('openai', 'sk-test-1234567890');
+  const events = await readSse(await json(`/v1/conversations/${conversation.id}/stream`, { method: 'POST', token, body: { content: 'Did BYAK launch? see https://10.0.0.1/internal', webSearch: true } }));
+  assert.ok(events.some(e => e.event === 'status' && /Searching the web/.test(e.data.message)));
+  const complete = events.find(e => e.event === 'message_complete').data;
+  assert.deepEqual(complete.citations, [{ id: 1, kind: 'web', title: 'Launch news', url: 'https://news.example/launch' }]);
+  const system = fake.calls.at(-1).body.messages[0].content;
+  assert.match(system, /\[Web source 1: Launch news\]\(https:\/\/news.example\/launch\)/);
+  assert.match(system, /Could not read https:\/\/10\.0\.0\.1\/internal: Private network targets are blocked/);
+});
+
+test('editing a message replaces it and everything after it', async () => {
+  let n = 0; fake.on('https://api.openai.com/v1/chat/completions', () => sseResponse([{ choices: [{ delta: { content: `answer ${++n}` } }] }, '[DONE]']));
+  const { token, conversation } = await chatWith('openai', 'sk-test-1234567890');
+  await readSse(await json(`/v1/conversations/${conversation.id}/stream`, { method: 'POST', token, body: { content: 'first question' } }));
+  await readSse(await json(`/v1/conversations/${conversation.id}/stream`, { method: 'POST', token, body: { content: 'second question' } }));
+  const before = await json(`/v1/conversations/${conversation.id}`, { token }).then(r => r.json());
+  const events = await readSse(await json(`/v1/conversations/${conversation.id}/edit`, { method: 'POST', token, body: { messageId: before.messages[0].id, content: 'first question, edited' } }));
+  assert.equal(events.find(e => e.event === 'message_complete').data.content, 'answer 3');
+  const after = await json(`/v1/conversations/${conversation.id}`, { token }).then(r => r.json());
+  assert.deepEqual(after.messages.map(m => m.content), ['first question, edited', 'answer 3']);
+  assert.equal((await json(`/v1/conversations/${conversation.id}/edit`, { method: 'POST', token, body: { messageId: after.messages[1].id, content: 'x' } })).status, 404);
+});
+
+test('prompt library CRUD with built-in templates', async () => {
+  const { accessToken: token } = await account();
+  const initial = await json('/v1/prompts', { token }).then(r => r.json());
+  assert.deepEqual(initial.items, []); assert.ok(initial.templates.length >= 5); assert.ok(initial.templates.every(t => t.content.includes('{{input}}')));
+  const created = await json('/v1/prompts', { method: 'POST', token, body: { title: 'Standup', content: 'Turn these notes into a standup update: {{input}}' } }).then(r => r.json());
+  const updated = await json(`/v1/prompts/${created.id}`, { method: 'PATCH', token, body: { title: 'Daily standup' } }).then(r => r.json());
+  assert.equal(updated.title, 'Daily standup'); assert.equal(updated.content, created.content);
+  assert.equal((await json('/v1/prompts', { method: 'POST', token, body: { title: '' } })).status, 400);
+  assert.equal((await json(`/v1/prompts/${created.id}`, { method: 'DELETE', token })).status, 200);
+  assert.equal((await json('/v1/prompts', { token }).then(r => r.json())).items.length, 0);
+});
+
+test('free plan: daily web search and image allowances, then a clear upgrade prompt', async () => {
+  fake.on('https://api.search.brave.com/', () => Response.json({ web: { results: [] } }));
+  fake.on('https://api.openai.com/v1/chat/completions', openaiOk('ok'));
+  const { token, conversation } = await chatWith('openai', 'sk-test-1234567890');
+  const ask = body => json(`/v1/conversations/${conversation.id}/messages`, { method: 'POST', token, body });
+  for (let i = 0; i < 3; i++) assert.equal((await ask({ content: `search ${i}`, webSearch: true })).status, 201);
+  const blocked = await ask({ content: 'one more', webSearch: true });
+  assert.equal(blocked.status, 402);
+  const error = (await blocked.json()).error;
+  assert.equal(error.code, 'plan_limit'); assert.match(error.message, /free web searches.*BYAK Pro raises this to 200/);
+  assert.equal((await ask({ content: 'no web is still fine' })).status, 201);
+
+  const image = { type: 'image', mimeType: 'image/png', data: PNG };
+  assert.equal((await ask({ content: 'pics', attachments: [image, image, image, image] })).status, 201);
+  const tooMany = await ask({ content: 'pics', attachments: [image, image] });
+  assert.equal(tooMany.status, 402); assert.match((await tooMany.json()).error.message, /1 left, this needs 2/);
+
+  const plan = await json('/v1/subscription', { token }).then(r => r.json());
+  assert.deepEqual(plan.usageToday, { webSearches: 3, images: 4 });
+  assert.equal(plan.limits.webSearchesPerDay, 3); assert.ok(plan.highlights.some(h => h.key === 'webSearchesPerDay'));
+});
+
+test('free plan keeps a shorter conversation memory and fewer saved prompts', async () => {
+  fake.on('https://api.openai.com/v1/chat/completions', openaiOk('ok'));
+  const { token, conversation } = await chatWith('openai', 'sk-test-1234567890');
+  for (let i = 0; i < 12; i++) await json(`/v1/conversations/${conversation.id}/messages`, { method: 'POST', token, body: { content: `message ${i}` } });
+  const sent = fake.calls.at(-1).body.messages;
+  assert.equal(sent.length, 1 + 20); // system prompt + last 20 messages on Free
+  assert.equal(sent.at(-1).content, 'message 11');
+
+  for (let i = 0; i < 5; i++) assert.equal((await json('/v1/prompts', { method: 'POST', token, body: { title: `p${i}`, content: 'x' } })).status, 201);
+  const sixth = await json('/v1/prompts', { method: 'POST', token, body: { title: 'p6', content: 'x' } });
+  assert.equal(sixth.status, 402); assert.match((await sixth.json()).error.message, /5 saved prompts/);
 });
