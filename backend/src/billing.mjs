@@ -30,7 +30,7 @@ function loadServiceAccount(raw) {
 export function createBilling({ store, fetchImpl = (...args) => fetch(...args), now = () => Date.now(), play = config.play } = {}) {
   let account; let cachedToken = null;
   const serviceAccount = () => (account ??= loadServiceAccount(play.serviceAccountJson));
-  const products = { [play.monthlyProductId]: 'monthly', [play.annualProductId]: 'annual' };
+  const basePlans = { [play.monthlyBasePlanId]: 'monthly', [play.annualBasePlanId]: 'annual' };
   const configured = () => Boolean(play.serviceAccountJson);
   const api = `https://androidpublisher.googleapis.com/androidpublisher/v3/applications/${encodeURIComponent(play.packageName)}`;
 
@@ -64,11 +64,12 @@ export function createBilling({ store, fetchImpl = (...args) => fetch(...args), 
 
   /** Writes Google's view of a purchase onto our record. Google is the source of truth; notification payloads are never trusted directly. */
   async function sync(record, purchaseToken, data, source) {
-    const lineItem = (data.lineItems || []).find(x => products[x.productId]);
+    const lineItem = (data.lineItems || []).find(x => x.productId === play.subscriptionProductId && basePlans[x.offerDetails?.basePlanId]);
     if (!lineItem) throw failure(400, 'This purchase is not a BYAK AI subscription');
+    const basePlanId = lineItem.offerDetails.basePlanId;
     const status = stateMap[data.subscriptionState] || 'pending';
     const patch = {
-      productId: lineItem.productId, plan: products[lineItem.productId], status,
+      productId: lineItem.productId, basePlanId, plan: basePlans[basePlanId], status,
       expiresAt: lineItem.expiryTime || null, autoRenewing: Boolean(lineItem.autoRenewingPlan?.autoRenewEnabled),
       acknowledged: data.acknowledgementState === 'ACKNOWLEDGEMENT_STATE_ACKNOWLEDGED', testPurchase: Boolean(data.testPurchase),
       orderId: data.latestOrderId || null, verifiedAt: new Date(now()).toISOString()
@@ -142,6 +143,6 @@ export function createBilling({ store, fetchImpl = (...args) => fetch(...args), 
     };
   }
 
-  const productIds = () => ({ monthly: play.monthlyProductId, annual: play.annualProductId });
+  const productIds = () => ({ monthly: play.subscriptionProductId, annual: play.subscriptionProductId });
   return { verify, handleNotification, entitlement, refresh, accountIdFor, configured, productIds };
 }
