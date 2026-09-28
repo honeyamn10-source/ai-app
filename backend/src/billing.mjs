@@ -5,9 +5,9 @@ import { decryptSecret, encryptSecret, hashToken, safeEqual } from './security.m
 
 const failure = (status, message) => Object.assign(new Error(message), { status });
 
-const freeLimits = { providers: 3, projects: 3, files: 25, memories: 50, researchPerDay: 50, webSearchesPerDay: 3, imagesPerDay: 5, savedPrompts: 5, historyMessages: 20, ragChunks: 4 };
-const proLimits = { providers: 50, projects: 200, files: 2000, memories: 2000, researchPerDay: 1000, webSearchesPerDay: 200, imagesPerDay: 500, savedPrompts: 200, historyMessages: 100, ragChunks: 10 };
-const proEntitlements = ['byok', 'basic_chat', 'basic_research', 'basic_exports', 'pro_chat', 'web_search', 'vision', 'long_memory', 'deep_document_search', 'unlimited_projects', 'large_knowledge_base', 'priority_research'];
+const freeLimits = { providers: 3, projects: 3, files: 25, memories: 50, researchPerDay: 50, webSearchesPerDay: 10, imagesPerDay: 12, savedPrompts: 5, historyMessages: 20, ragChunks: 4, comparisonsPerDay: 2 };
+const proLimits = { providers: 50, projects: 200, files: 2000, memories: 2000, researchPerDay: 1000, webSearchesPerDay: 200, imagesPerDay: 500, savedPrompts: 200, historyMessages: 100, ragChunks: 10, comparisonsPerDay: 100 };
+const proEntitlements = ['byok', 'basic_chat', 'basic_research', 'basic_exports', 'pro_chat', 'web_search', 'vision', 'model_compare', 'long_memory', 'deep_document_search', 'unlimited_projects', 'large_knowledge_base', 'priority_research'];
 
 export const plans = Object.freeze({
   free: { id: 'free', tier: 'free', price: 0, currency: 'USD', entitlements: ['byok', 'basic_chat', 'basic_research', 'basic_exports'], limits: freeLimits },
@@ -17,8 +17,9 @@ export const plans = Object.freeze({
 
 /** What Pro adds, for paywalls and the plans screen. */
 export const proHighlights = Object.freeze([
-  { key: 'webSearchesPerDay', title: 'Live web search in chat', free: '3 per day', pro: '200 per day' },
-  { key: 'imagesPerDay', title: 'Ask about photos', free: '5 images per day', pro: '500 per day' },
+  { key: 'webSearchesPerDay', title: 'Live web search in chat', free: '10 per day', pro: '200 per day' },
+  { key: 'imagesPerDay', title: 'Ask about photos', free: '12 images per day', pro: '500 per day' },
+  { key: 'comparisonsPerDay', title: 'Compare two models side by side', free: '2 per day', pro: '100 per day' },
   { key: 'historyMessages', title: 'Conversation memory', free: 'Last 20 messages', pro: 'Last 100 messages' },
   { key: 'ragChunks', title: 'Document search depth', free: '4 excerpts per answer', pro: '10 excerpts per answer' },
   { key: 'projects', title: 'Projects', free: '3', pro: '200' },
@@ -46,7 +47,9 @@ function loadServiceAccount(raw) {
 export function createBilling({ store, fetchImpl = (...args) => fetch(...args), now = () => Date.now(), play = config.play } = {}) {
   let account; let cachedToken = null;
   const serviceAccount = () => (account ??= loadServiceAccount(play.serviceAccountJson));
-  const products = { [play.monthlyProductId]: 'monthly', [play.annualProductId]: 'annual' };
+  const basePlans = { [play.monthlyBasePlanId]: 'monthly', [play.yearlyBasePlanId]: 'annual' };
+  /** Maps a subscriptionsv2 line item to our plan via its product and base plan (e.g. byak_pro / yearly). */
+  const planFor = item => (item?.productId === play.productId ? basePlans[item.offerDetails?.basePlanId] : undefined);
   const configured = () => Boolean(play.serviceAccountJson);
   const api = `https://androidpublisher.googleapis.com/androidpublisher/v3/applications/${encodeURIComponent(play.packageName)}`;
 
@@ -80,11 +83,11 @@ export function createBilling({ store, fetchImpl = (...args) => fetch(...args), 
 
   /** Writes Google's view of a purchase onto our record. Google is the source of truth; notification payloads are never trusted directly. */
   async function sync(record, purchaseToken, data, source) {
-    const lineItem = (data.lineItems || []).find(x => products[x.productId]);
+    const lineItem = (data.lineItems || []).find(planFor);
     if (!lineItem) throw failure(400, 'This purchase is not a BYAK AI subscription');
     const status = stateMap[data.subscriptionState] || 'pending';
     const patch = {
-      productId: lineItem.productId, plan: products[lineItem.productId], status,
+      productId: lineItem.productId, plan: planFor(lineItem), basePlanId: lineItem.offerDetails.basePlanId, offerId: lineItem.offerDetails.offerId || null, status,
       expiresAt: lineItem.expiryTime || null, autoRenewing: Boolean(lineItem.autoRenewingPlan?.autoRenewEnabled),
       acknowledged: data.acknowledgementState === 'ACKNOWLEDGEMENT_STATE_ACKNOWLEDGED', testPurchase: Boolean(data.testPurchase),
       orderId: data.latestOrderId || null, verifiedAt: new Date(now()).toISOString()
@@ -153,11 +156,11 @@ export function createBilling({ store, fetchImpl = (...args) => fetch(...args), 
     const plan = plans[active?.plan] || plans.free;
     return {
       plan: plan.id, tier: plan.tier, status: active ? active.status : 'active', entitlements: plan.entitlements, limits: plan.limits,
-      productId: active?.productId || null, expiresAt: active?.expiresAt || null, autoRenewing: active?.autoRenewing ?? false,
+      productId: active?.productId || null, basePlanId: active?.basePlanId || null, expiresAt: active?.expiresAt || null, autoRenewing: active?.autoRenewing ?? false,
       platform: active?.platform || null, billingAccountId: accountIdFor(userId), verificationAvailable: configured()
     };
   }
 
-  const productIds = () => ({ monthly: play.monthlyProductId, annual: play.annualProductId });
+  const productIds = () => ({ productId: play.productId, monthly: play.monthlyBasePlanId, annual: play.yearlyBasePlanId });
   return { verify, handleNotification, entitlement, refresh, accountIdFor, configured, productIds };
 }

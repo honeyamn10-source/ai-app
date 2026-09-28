@@ -130,8 +130,8 @@ fun perkLine(title: String, value: String, separator: String): androidx.compose.
 }
 /** Used until the server's list arrives (and by older servers that don't send one). */
 val defaultHighlights = listOf(
-    ProHighlight("webSearchesPerDay", "Live web search in chat", "3 per day", "200 per day"),
-    ProHighlight("imagesPerDay", "Ask about photos", "5 images per day", "500 per day"),
+    ProHighlight("webSearchesPerDay", "Live web search in chat", "10 per day", "200 per day"),
+    ProHighlight("imagesPerDay", "Ask about photos", "12 images per day", "500 per day"),
     ProHighlight("historyMessages", "Conversation memory", "Last 20 messages", "Last 100 messages"),
     ProHighlight("ragChunks", "Document search depth", "4 excerpts per answer", "10 excerpts per answer"),
     ProHighlight("projects", "Projects", "3", "200"),

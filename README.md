@@ -143,8 +143,8 @@ docs/                    Architecture, security, API and release guidance
 
 | | Free | Pro (monthly ≈ $1 / annual ≈ $10) |
 |---|---|---|
-| Live web search in chat | 3 per day | 200 per day |
-| Photo questions (vision) | 5 images per day | 500 per day |
+| Live web search in chat | 10 per day | 200 per day |
+| Photo questions (vision) | 12 images per day | 500 per day |
 | Conversation memory sent to the model | last 20 messages | last 100 messages |
 | Document excerpts per answer | 4 | 10 |
 | Projects | 3 | 200 |
