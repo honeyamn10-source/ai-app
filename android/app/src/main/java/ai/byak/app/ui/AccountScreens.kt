@@ -124,6 +124,10 @@ private val playProducts get() = listOf(BuildConfig.PLAY_MONTHLY_PRODUCT_ID, Bui
 }
 
 // ---------- Plan / payments ----------
+/** "Title · value" as one wrapping paragraph with a bold title (two side-by-side Texts wrap into ragged columns). */
+fun perkLine(title: String, value: String, separator: String): androidx.compose.ui.text.AnnotatedString = androidx.compose.ui.text.buildAnnotatedString {
+    pushStyle(androidx.compose.ui.text.SpanStyle(fontWeight = FontWeight.SemiBold)); append(title); pop(); append(separator); append(value)
+}
 /** Used until the server's list arrives (and by older servers that don't send one). */
 val defaultHighlights = listOf(
     ProHighlight("webSearchesPerDay", "Live web search in chat", "3 per day", "200 per day"),
@@ -152,7 +156,7 @@ val defaultHighlights = listOf(
                         highlights.take(4).forEach { perk ->
                             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(vertical = 3.dp)) {
                                 Icon(Icons.Outlined.CheckCircle, null, Modifier.size(18.dp), tint = MaterialTheme.colorScheme.primary); Spacer(Modifier.width(8.dp))
-                                Text(perk.title, fontWeight = FontWeight.SemiBold); Text(" · ${perk.pro}")
+                                Text(perkLine(perk.title, perk.pro, " · "), style = MaterialTheme.typography.bodyMedium)
                             }
                         }
                     }

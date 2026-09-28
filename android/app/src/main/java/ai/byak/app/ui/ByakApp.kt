@@ -133,7 +133,7 @@ fun Context.findActivity(): Activity? = when (this) { is Activity -> this; is Co
                 perks.forEach { perk ->
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Icon(Icons.Outlined.CheckCircle, null, Modifier.size(18.dp), tint = MaterialTheme.colorScheme.secondary); Spacer(Modifier.width(8.dp))
-                        Text("${perk.title}: ", fontWeight = FontWeight.SemiBold); Text(perk.pro)
+                        Text(perkLine(perk.title, perk.pro, ": "))
                     }
                 }
                 Text("From about $1 a month. Cancel anytime in Google Play.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
