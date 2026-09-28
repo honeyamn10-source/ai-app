@@ -17,8 +17,8 @@ android {
         fun prop(name: String, fallback: String) = (project.findProperty(name) as String?)?.takeIf { it.isNotBlank() } ?: System.getenv(name)?.takeIf { it.isNotBlank() } ?: fallback
         buildConfigField("String", "API_BASE_URL", "\"${prop("BYAK_API_URL", "http://10.0.2.2:8787")}\"")
         buildConfigField("String", "GOOGLE_WEB_CLIENT_ID", "\"${prop("BYAK_GOOGLE_WEB_CLIENT_ID", "")}\"")
-        buildConfigField("String", "PLAY_MONTHLY_PRODUCT_ID", "\"${prop("BYAK_PLAY_MONTHLY_PRODUCT_ID", "byak_monthly_1")}\"")
-        buildConfigField("String", "PLAY_ANNUAL_PRODUCT_ID", "\"${prop("BYAK_PLAY_ANNUAL_PRODUCT_ID", "byak_annual_10")}\"")
+        buildConfigField("String", "PLAY_MONTHLY_PRODUCT_ID", "\"${prop("BYAK_PLAY_MONTHLY_PRODUCT_ID", "monthly")}\"")
+        buildConfigField("String", "PLAY_ANNUAL_PRODUCT_ID", "\"${prop("BYAK_PLAY_ANNUAL_PRODUCT_ID", "yearly")}\"")
     }
     buildFeatures { compose = true; buildConfig = true }
     buildTypes {

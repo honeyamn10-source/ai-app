@@ -61,7 +61,9 @@ class BillingManager(context: Context) : PurchasesUpdatedListener {
         }).build()
         val details: List<ProductDetails> = client.queryProductDetails(params).productDetailsList ?: emptyList()
         return details.mapNotNull { product ->
-            val offer = product.subscriptionOfferDetails?.firstOrNull() ?: return@mapNotNull null
+            val offers = product.subscriptionOfferDetails.orEmpty()
+            // Base plan (no offerId) first; promotional offers can be added later deliberately.
+            val offer = offers.firstOrNull { it.offerId == null } ?: offers.firstOrNull() ?: return@mapNotNull null
             val price = offer.pricingPhases.pricingPhaseList.lastOrNull()?.formattedPrice ?: return@mapNotNull null
             PlanOffer(product.productId, product.name, price, product, offer.offerToken)
         }.sortedBy { productIds.indexOf(it.productId) }
