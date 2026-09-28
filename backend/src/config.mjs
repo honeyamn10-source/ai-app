@@ -25,6 +25,11 @@ export const config = Object.freeze({
   googleClientIds: [process.env.GOOGLE_ANDROID_CLIENT_ID, process.env.GOOGLE_WEB_CLIENT_ID].filter(Boolean),
   googlePlayServiceAccount,
   googlePlayPackageName: process.env.GOOGLE_PLAY_PACKAGE_NAME || 'ai.byak.app',
-  googlePlayProducts: new Set(['byak_monthly_1', 'byak_annual_10']),
+  googlePlayProducts: new Set(
+    (process.env.GOOGLE_PLAY_PRODUCT_IDS || 'byak_pro')
+      .split(',')
+      .map(value => value.trim())
+      .filter(Boolean),
+  ),
   requestId: () => randomBytes(8).toString('hex')
 });
