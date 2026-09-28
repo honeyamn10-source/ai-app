@@ -57,6 +57,23 @@ kotlin {
     }
 }
 
+// Lets the release workflow read the version it just built, so it can refuse to
+// upload a bundle whose versionCode is not higher than what Play already has.
+// Google Play rejects a lower or reused versionCode, and the release branches in
+// this repository do not share a single monotonic version line with main.
+tasks.register("releaseVersionInfo") {
+    val versionCode = android.defaultConfig.versionCode
+    val versionName = android.defaultConfig.versionName
+    val applicationId = android.defaultConfig.applicationId
+    doLast {
+        val out = layout.buildDirectory.file("release-version-info.txt").get().asFile
+        out.parentFile.mkdirs()
+        out.writeText("versionCode=$versionCode\nversionName=$versionName\napplicationId=$applicationId\n")
+        logger.lifecycle("BYAK_RELEASE_VERSION_CODE=$versionCode")
+        logger.lifecycle("BYAK_RELEASE_VERSION_NAME=$versionName")
+    }
+}
+
 dependencies {
     val composeBom = platform("androidx.compose:compose-bom:2025.01.00")
     implementation(composeBom)

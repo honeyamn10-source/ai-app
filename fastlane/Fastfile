@@ -1,0 +1,84 @@
+default_platform(:android)
+
+# Publishing lanes for BYAK AI.
+#
+# The signed bundle is always built by Gradle from the keystore decoded out of
+# BYAK_UPLOAD_KEYSTORE_BASE64. This lane only uploads that already-signed bundle
+# through fastlane supply; it never re-signs anything.
+
+platform :android do
+
+  desc "Upload the signed AAB to a Google Play track"
+  lane :publish do |options|
+    track = options[:track].to_s
+    fraction = options[:rollout_fraction].to_s
+
+    ui.message("BYAK AI — publishing to track: #{track}")
+    ui.message("Bundle: #{options[:aab_path]}")
+
+    # internal has no staged rollout: a single fraction, always 100% of testers.
+    staged = %w[alpha beta production].include?(track)
+
+    unless staged
+      ui.message("Track '#{track}' is not staged; ignoring rollout_fraction.")
+    end
+
+    if staged && fraction.empty?
+      UI.user_error!("rollout_fraction is required for track '#{track}' (for example 0.1).")
+    end
+
+    if staged
+      value = begin
+        Float(fraction)
+      rescue ArgumentError, TypeError
+        UI.user_error!("rollout_fraction must be a decimal between 0 and 1, got '#{fraction}'.")
+      end
+      UI.user_error!("rollout_fraction must be > 0 and <= 1, got #{value}.") unless value > 0 && value <= 1
+    end
+
+    supply_options = {
+      package_name: "ai.byak.app",
+      aab_path: options[:aab_path],
+      track: track,
+      json_key: options[:json_key],
+      skip_upload_metadata: true,
+      skip_upload_changelogs: false,
+      changes_not_sent_for_review: true,
+      validate_only: false
+    }
+
+    if staged
+      supply_options[:rollout_fraction] = fraction
+      # Staged release: hand the rollout to Google and let it run.
+      supply_options[:status] = "inProgress"
+      ui.message("Staged rollout: status=inProgress rollout_fraction=#{fraction}")
+    else
+      ui.message("Full release to '#{track}': status=inProgress")
+    end
+
+    supply(supply_options)
+  end
+
+  desc "Promote an existing in-progress rollout to a new fraction"
+  lane :set_rollout do |options|
+    track = options[:track].to_s
+    fraction = options[:rollout_fraction].to_s
+    value = begin
+      Float(fraction)
+    rescue ArgumentError, TypeError
+      UI.user_error!("rollout_fraction must be a decimal between 0 and 1.")
+    end
+    UI.user_error!("rollout_fraction must be > 0 and <= 1.") unless value > 0 && value <= 1
+
+    supply(
+      package_name: "ai.byak.app",
+      track: track,
+      rollout_fraction: fraction,
+      status: "inProgress",
+      json_key: options[:json_key],
+      skip_upload_metadata: true,
+      skip_upload_apk: true,
+      skip_upload_aab: true
+    )
+  end
+end

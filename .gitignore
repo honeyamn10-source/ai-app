@@ -10,3 +10,7 @@ android/**/build/
 *.keystore
 .idea/
 .DS_Store
+
+# Generated legal pages. Built by scripts/build-legal-pages.py once the
+# [[...]] operator placeholders in docs/legal are filled in.
+site/legal/
