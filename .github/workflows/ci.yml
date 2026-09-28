@@ -36,7 +36,7 @@ jobs:
       - name: Upload Android release artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: BYAK-AI-v3.0.0-code33
+          name: BYAK-AI-v3.0.1-code34
           path: |
             android/app/build/outputs/apk/debug/app-debug.apk
             android/app/build/outputs/bundle/release/app-release.aab
