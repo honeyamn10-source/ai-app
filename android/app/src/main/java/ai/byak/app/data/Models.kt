@@ -7,15 +7,23 @@ data class Conversation(
     val id: String, val title: String, val providerId: String? = null, val model: String = "",
     val projectId: String? = null, val pinned: Boolean = false, val preview: String = "", val updatedAt: String = ""
 )
-data class Citation(val id: Int, val title: String, val chunk: Int)
+data class Citation(val id: Int, val title: String, val chunk: Int, val kind: String = "document", val url: String? = null)
+data class AttachmentRef(val index: Int, val mimeType: String)
+/** An image picked in the composer, already downscaled and encoded for upload. */
+class ImageDraft(val mimeType: String, val bytes: ByteArray)
 data class ChatMessage(
     val id: String, val role: String, val content: String, val pending: Boolean = false,
-    val status: String = "complete", val model: String? = null, val citations: List<Citation> = emptyList()
+    val status: String = "complete", val model: String? = null, val citations: List<Citation> = emptyList(),
+    val attachments: List<AttachmentRef> = emptyList(), val localImages: List<ImageDraft> = emptyList()
 )
 data class Project(val id: String, val name: String, val description: String = "", val instructions: String = "", val conversationCount: Int = 0, val fileCount: Int = 0)
 data class ResearchResult(val title: String, val url: String, val summary: String)
 data class UserFile(val id: String, val name: String, val mimeType: String, val chunkCount: Int, val size: Long = 0, val projectId: String? = null)
 data class Memory(val id: String, val content: String)
+data class SavedPrompt(val id: String, val title: String, val content: String, val category: String = "", val builtIn: Boolean = false) {
+    /** Template text with the {{input}} marker removed, ready for the composer. */
+    val composerText: String get() = content.replace("{{input}}", "").trimEnd() + if (content.contains("{{input}}")) "\n" else ""
+}
 data class Device(val id: String, val device: String, val lastUsedAt: String, val current: Boolean)
 data class ModelUsage(val provider: String, val model: String, val requests: Int, val inputTokens: Long, val outputTokens: Long)
 data class DayUsage(val day: String, val requests: Int, val tokens: Long)
@@ -34,4 +42,5 @@ sealed interface StreamEvent {
     data class Delta(val text: String) : StreamEvent
     data class Complete(val message: ChatMessage) : StreamEvent
     data class Failed(val message: String) : StreamEvent
+    data class Status(val message: String) : StreamEvent
 }

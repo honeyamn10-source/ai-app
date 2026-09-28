@@ -21,7 +21,12 @@ data class UiState(
     val projects: List<Project> = emptyList(), val files: List<UserFile> = emptyList(), val research: List<ResearchResult> = emptyList(),
     val profile: Profile? = null, val subscription: Subscription = Subscription.FREE, val offers: List<PlanOffer> = emptyList(),
     val memoryEnabled: Boolean = false, val memories: List<Memory> = emptyList(), val usage: Usage? = null, val devices: List<Device> = emptyList(),
-    val modelOptions: Map<String, List<String>> = emptyMap(), val upgradeSuggested: Boolean = false
+    val modelOptions: Map<String, List<String>> = emptyMap(), val upgradeSuggested: Boolean = false,
+    // composer
+    val drafts: List<ImageDraft> = emptyList(), val webSearch: Boolean = false, val editing: ChatMessage? = null,
+    val generationStatus: String? = null, val composerPrefill: String? = null,
+    // prompt library
+    val prompts: List<SavedPrompt> = emptyList(), val templates: List<SavedPrompt> = emptyList()
 )
 
 class ByakViewModel(private val api: ApiClient, private val billing: BillingManager) : ViewModel() {
@@ -114,8 +119,18 @@ class ByakViewModel(private val api: ApiClient, private val billing: BillingMana
     fun send(text: String) {
         val conversation = state.value.activeConversation ?: return
         val provider = activeProvider(conversation) ?: run { update { copy(error = "Connect an AI provider in Models first") }; return }
-        val local = ChatMessage("local-user-${System.nanoTime()}", "user", text)
-        streamInto(conversation, listOf(local)) { api.streamMessage(conversation.id, text, provider.id, conversation.model.ifBlank { provider.defaultModel }) }
+        val model = conversation.model.ifBlank { provider.defaultModel }; val web = state.value.webSearch
+        state.value.editing?.let { original ->
+            // Editing drops the original message and everything after it, locally and on the server.
+            val kept = state.value.messages.takeWhile { it.id != original.id }
+            update { copy(messages = kept, editing = null) }
+            streamInto(conversation, listOf(original.copy(id = "local-user-${System.nanoTime()}", content = text, attachments = emptyList()))) { api.editMessage(conversation.id, original.id, text, provider.id, model, web) }
+            return
+        }
+        val images = state.value.drafts
+        val local = ChatMessage("local-user-${System.nanoTime()}", "user", text, localImages = images)
+        update { copy(drafts = emptyList()) }
+        streamInto(conversation, listOf(local)) { api.streamMessage(conversation.id, text, provider.id, model, images, web) }
     }
 
     fun regenerate() {
@@ -123,7 +138,23 @@ class ByakViewModel(private val api: ApiClient, private val billing: BillingMana
         val provider = activeProvider(conversation) ?: return
         val trimmed = state.value.messages.dropLastWhile { it.role == "assistant" }
         update { copy(messages = trimmed) }
-        streamInto(conversation, emptyList()) { api.regenerate(conversation.id, provider.id, conversation.model.ifBlank { provider.defaultModel }) }
+        streamInto(conversation, emptyList()) { api.regenerate(conversation.id, provider.id, conversation.model.ifBlank { provider.defaultModel }, state.value.webSearch) }
+    }
+
+    fun startEdit(message: ChatMessage) { if (!state.value.streaming) update { copy(editing = message, composerPrefill = message.content) } }
+    fun cancelEdit() = update { copy(editing = null, composerPrefill = "") }
+    fun toggleWebSearch() = update { copy(webSearch = !webSearch) }
+    fun addDraft(image: ImageDraft) { if (state.value.drafts.size >= 4) update { copy(error = "You can attach up to 4 images") } else update { copy(drafts = drafts + image) } }
+    fun removeDraft(image: ImageDraft) = update { copy(drafts = drafts - image) }
+    fun consumePrefill() = update { copy(composerPrefill = null) }
+
+    private val attachmentCache = object : LinkedHashMap<String, ByteArray>(16, 0.75f, true) { override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, ByteArray>?) = size > 24 }
+    /** Loads a stored image for a message bubble, keeping a small in-memory cache. */
+    suspend fun attachment(messageId: String, index: Int): ByteArray? {
+        val conversation = state.value.activeConversation ?: return null
+        val key = "$messageId/$index"
+        synchronized(attachmentCache) { attachmentCache[key] }?.let { return it }
+        return runCatching { api.attachment(conversation.id, messageId, index) }.getOrNull()?.also { bytes -> synchronized(attachmentCache) { attachmentCache[key] = bytes } }
     }
 
     private fun streamInto(conversation: Conversation, prefix: List<ChatMessage>, source: () -> Flow<StreamEvent>) {
@@ -135,16 +166,17 @@ class ByakViewModel(private val api: ApiClient, private val billing: BillingMana
             try {
                 source().collect { event ->
                     when (event) {
-                        is StreamEvent.Delta -> { answer += event.text; update { copy(messages = messages.dropLast(1) + pending.copy(content = answer)) } }
+                        is StreamEvent.Delta -> { answer += event.text; update { copy(messages = messages.dropLast(1) + pending.copy(content = answer), generationStatus = null) } }
                         is StreamEvent.Complete -> update { copy(messages = messages.dropLast(1) + event.message) }
                         is StreamEvent.Failed -> update { copy(error = event.message) }
+                        is StreamEvent.Status -> update { copy(generationStatus = event.message) }
                     }
                 }
             } catch (e: CancellationException) { /* stopped by the user; the server keeps the partial answer */ }
             catch (e: ApiException) { update { copy(error = e.message, upgradeSuggested = e.code == "plan_limit" || upgradeSuggested) } }
             catch (e: Exception) { update { copy(error = e.message ?: "Generation failed") } }
             finally {
-                update { copy(streaming = false) }
+                update { copy(streaming = false, generationStatus = null) }
                 viewModelScope.launch {
                     delay(250) // let the server persist a stopped/partial answer
                     runCatching { api.messages(conversation.id) }.onSuccess { list -> if (state.value.activeConversation?.id == conversation.id) update { copy(messages = list) } }
@@ -177,6 +209,16 @@ class ByakViewModel(private val api: ApiClient, private val billing: BillingMana
     fun removeFile(id: String) = task("File deleted") { api.deleteFile(id); val list = api.files(); update { copy(files = list) } }
     fun reportError(message: String) = update { copy(error = message) }
 
+    // ---------- prompt library ----------
+    fun loadPrompts() = task { val (mine, templates) = api.prompts(); update { copy(prompts = mine, templates = templates) } }
+    fun savePrompt(id: String?, title: String, content: String) = task("Prompt saved") { api.savePrompt(id, title, content); val (mine, templates) = api.prompts(); update { copy(prompts = mine, templates = templates) } }
+    fun deletePrompt(id: String) = task("Prompt deleted") { api.deletePrompt(id); update { copy(prompts = prompts.filterNot { it.id == id }) } }
+    /** Puts a prompt into the chat composer, opening a new chat if none is active. */
+    fun usePrompt(prompt: SavedPrompt) {
+        update { copy(composerPrefill = prompt.composerText) }
+        if (state.value.activeConversation == null) newConversation()
+    }
+
     // ---------- memory, usage, account ----------
     fun loadMemory() = task { val (enabled, items) = api.memory(); update { copy(memoryEnabled = enabled, memories = items) } }
     fun setMemoryEnabled(enabled: Boolean) = task { api.setMemoryEnabled(enabled); update { copy(memoryEnabled = enabled) } }
@@ -208,5 +250,5 @@ class ByakViewModel(private val api: ApiClient, private val billing: BillingMana
         notice(if (sub.isPro) "Your Pro plan is active" else "Purchase found but not active")
     }
 
-    override fun onCleared() { billing.close() }
+    // BillingManager is application-scoped (shared by every screen and account), so the ViewModel must not close it.
 }

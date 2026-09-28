@@ -1,5 +1,5 @@
 openapi: 3.1.0
-info: { title: BYAK AI API, version: 0.2.0 }
+info: { title: BYAK AI API, version: 0.3.0 }
 servers: [{ url: https://api.example.com }]
 security: [{ bearerAuth: [] }]
 components:
@@ -56,9 +56,11 @@ paths:
   /v1/conversations/{id}/stream:
     post:
       parameters: [{ $ref: '#/components/parameters/Id' }]
-      description: 'SSE events message_start, content_delta, usage, message_complete, error. Closing the connection stops generation; the partial answer is saved with status "stopped".'
+      description: 'Body: content, optional providerId, model, temperature, webSearch (bool) and attachments (up to 4 of {type: image, mimeType, data: base64}). SSE events status, message_start, content_delta, usage, message_complete, error. Closing the connection stops generation; the partial answer is saved with status "stopped".'
       responses: { '200': { description: SSE stream, content: { text/event-stream: {} } } }
   /v1/conversations/{id}/regenerate: { post: { parameters: [{ $ref: '#/components/parameters/Id' }], description: Replace the last answer (SSE), responses: { '200': { description: SSE stream, content: { text/event-stream: {} } } } } }
+  /v1/conversations/{id}/edit: { post: { parameters: [{ $ref: '#/components/parameters/Id' }], description: 'Body: messageId, content. Replaces that user message and everything after it, then answers it (SSE).', responses: { '200': { description: SSE stream, content: { text/event-stream: {} } }, '404': { description: Not a user message in this conversation } } } }
+  /v1/conversations/{id}/messages/{messageId}/attachments/{index}: { get: { parameters: [{ $ref: '#/components/parameters/Id' }, { name: messageId, in: path, required: true, schema: { type: string } }, { name: index, in: path, required: true, schema: { type: integer } }], responses: { '200': { description: Image bytes, content: { image/*: {} } } } } }
   /v1/conversations/{id}/messages/{messageId}: { delete: { parameters: [{ $ref: '#/components/parameters/Id' }, { name: messageId, in: path, required: true, schema: { type: string } }], responses: { '200': { description: Deleted } } } }
   /v1/exports/conversations/{id}: { get: { parameters: [{ $ref: '#/components/parameters/Id' }, { name: format, in: query, schema: { enum: [markdown, txt, json] } }], responses: { '200': { description: Download } } } }
 
@@ -79,6 +81,13 @@ paths:
   /v1/research: { post: { responses: { '200': { description: Source-attributed results }, '402': { $ref: '#/components/responses/PlanLimit' } } } }
   /v1/tools/url-reader: { post: { description: Fetch a public HTTPS page as text (private networks blocked), responses: { '200': { description: Page text } } } }
 
+  /v1/prompts:
+    get: { responses: { '200': { description: Saved prompts and built-in templates } } }
+    post: { responses: { '201': { description: Prompt saved } } }
+  /v1/prompts/{id}:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    patch: { responses: { '200': { description: Updated } } }
+    delete: { responses: { '200': { description: Deleted } } }
   /v1/memory:
     get: { responses: { '200': { description: Memory setting and items } } }
     post: { responses: { '201': { description: Memory saved } } }

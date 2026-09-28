@@ -2,6 +2,22 @@
 
 Notable repository changes are recorded here.
 
+## 0.3.0
+
+### Added
+- Photo attachments for vision models (OpenAI, Anthropic, Gemini), downscaled on-device before upload.
+- Web search in chat and automatic reading of pasted links, with clickable web citations.
+- Voice input and read-aloud for answers.
+- Edit and resend your last message.
+- Prompt library with ten built-in templates and your own saved prompts.
+- Appearance setting (system, light, dark) and Material You dynamic color.
+- Configurable server address on the sign-in screen and in Settings.
+
+### Fixed
+- Release builds pointed at the emulator address over HTTP and could never connect.
+- Signing in as a different account could show the previous account's chat, research and plan.
+- The shared Play Billing connection was closed when a screen was destroyed, breaking purchases until the app restarted.
+
 ## 0.2.0
 
 ### Fixed

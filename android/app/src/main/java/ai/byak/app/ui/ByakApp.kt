@@ -28,7 +28,7 @@ import kotlinx.coroutines.launch
 
 enum class Destination(val title: String, val icon: ImageVector) {
     Home("Home", Icons.Outlined.Home), Chats("Chats", Icons.Outlined.ChatBubbleOutline), Search("Research", Icons.Outlined.TravelExplore),
-    Files("Files", Icons.Outlined.FolderOpen), Projects("Projects", Icons.Outlined.Workspaces), Models("Models", Icons.Outlined.Hub),
+    Files("Files", Icons.Outlined.FolderOpen), Projects("Projects", Icons.Outlined.Workspaces), Prompts("Prompts", Icons.Outlined.AutoStories), Models("Models", Icons.Outlined.Hub),
     Plan("BYAK Pro", Icons.Outlined.WorkspacePremium), Memory("Memory", Icons.Outlined.Psychology), Usage("Usage", Icons.Outlined.BarChart),
     Devices("Devices", Icons.Outlined.Devices), Settings("Settings", Icons.Outlined.Settings)
 }
@@ -39,11 +39,12 @@ fun Context.findActivity(): Activity? = when (this) { is Activity -> this; is Co
 @Composable fun ByakApp(app: ByakApplication) {
     val session by app.sessionStore.session.collectAsState(initial = null)
     val current = session
-    if (current == null) AuthScreen(app.api) else MainShell(app, current)
+    if (current == null) AuthScreen(app.api, app.settings) else MainShell(app, current)
 }
 
 @Composable private fun MainShell(app: ByakApplication, session: Session) {
-    val vm: ByakViewModel = viewModel(factory = viewModelFactory { initializer { ByakViewModel(app.api, app.billing) } })
+    // Keyed by account so signing in as someone else never shows the previous account's chats, research or plan.
+    val vm: ByakViewModel = viewModel(key = "byak:${session.email}", factory = viewModelFactory { initializer { ByakViewModel(app.api, app.billing) } })
     val state by vm.state.collectAsState()
     var destination by rememberSaveable { mutableStateOf(Destination.Home) }
     val drawer = rememberDrawerState(DrawerValue.Closed)
@@ -101,12 +102,13 @@ fun Context.findActivity(): Activity? = when (this) { is Activity -> this; is Co
                             Destination.Search -> ResearchScreen(state, vm) { destination = Destination.Chats }
                             Destination.Files -> FilesScreen(state, vm)
                             Destination.Projects -> ProjectsScreen(state, vm) { destination = Destination.Chats }
+                            Destination.Prompts -> PromptsScreen(state, vm) { destination = Destination.Chats }
                             Destination.Models -> ModelsScreen(state, vm)
                             Destination.Plan -> PlanScreen(state, vm)
                             Destination.Memory -> MemoryScreen(state, vm)
                             Destination.Usage -> UsageScreen(state, vm)
                             Destination.Devices -> DevicesScreen(state, vm)
-                            Destination.Settings -> SettingsScreen(session, state, vm, navigate)
+                            Destination.Settings -> SettingsScreen(session, state, vm, app.settings, navigate)
                         }
                     }
                 }

@@ -6,6 +6,9 @@ import android.content.Intent
 import android.net.Uri
 import ai.byak.app.BuildConfig
 import ai.byak.app.data.Session
+import ai.byak.app.data.SettingsStore
+import ai.byak.app.data.ThemeMode
+import ai.byak.app.ui.theme.dynamicColorSupported
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
@@ -34,8 +37,10 @@ import kotlinx.coroutines.withContext
 private val playProducts get() = listOf(BuildConfig.PLAY_MONTHLY_PRODUCT_ID, BuildConfig.PLAY_ANNUAL_PRODUCT_ID)
 
 // ---------- Settings ----------
-@Composable fun SettingsScreen(session: Session, state: UiState, vm: ByakViewModel, navigate: (Destination) -> Unit) {
+@Composable fun SettingsScreen(session: Session, state: UiState, vm: ByakViewModel, settings: SettingsStore, navigate: (Destination) -> Unit) {
     val context = LocalContext.current; val scope = rememberCoroutineScope()
+    val server by settings.serverUrl.collectAsState(initial = ""); val themeMode by settings.themeMode.collectAsState(initial = ThemeMode.System); val dynamic by settings.dynamicColor.collectAsState(initial = false)
+    var editingServer by remember { mutableStateOf(false) }; var appearance by remember { mutableStateOf(false) }
     var deleting by remember { mutableStateOf(false) }; var editingProfile by remember { mutableStateOf(false) }; var changingPassword by remember { mutableStateOf(false) }
     val exporter = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
         uri ?: return@rememberLauncherForActivityResult
@@ -52,10 +57,13 @@ private val playProducts get() = listOf(BuildConfig.PLAY_MONTHLY_PRODUCT_ID, Bui
         item { SettingsRow(Icons.Outlined.WorkspacePremium, if (sub.isPro) "BYAK Pro (${sub.plan})" else "Free plan", if (sub.isPro) sub.expiresAt?.let { "${if (sub.autoRenewing) "Renews" else "Ends"} ${it.take(10)}" } ?: "Active" else "Upgrade from $1/month") { navigate(Destination.Plan) } }
         item { SettingsRow(Icons.Outlined.Hub, "AI providers", "${state.providers.size} encrypted connection(s)") { navigate(Destination.Models) } }
         item { SettingsRow(Icons.Outlined.Workspaces, "Projects", "${state.projects.size} project(s)") { navigate(Destination.Projects) } }
+        item { SettingsRow(Icons.Outlined.AutoStories, "Prompt library", "Templates and your saved prompts") { navigate(Destination.Prompts) } }
+        item { SettingsRow(Icons.Outlined.Palette, "Appearance", themeMode.name + if (dynamic && dynamicColorSupported) " · dynamic color" else "") { appearance = true } }
         item { SettingsRow(Icons.Outlined.Psychology, "Memory & instructions", if (state.memoryEnabled) "On · the AI remembers what you save" else "Off · view and clear anytime") { navigate(Destination.Memory) } }
         item { SettingsRow(Icons.Outlined.BarChart, "Usage", "Tokens and requests by model") { navigate(Destination.Usage) } }
         item { SettingsRow(Icons.Outlined.Devices, "Signed-in devices", "Review and sign out other devices") { navigate(Destination.Devices) } }
         if (state.profile?.hasPassword != false) item { SettingsRow(Icons.Outlined.Lock, "Change password", "Signs out your other devices") { changingPassword = true } }
+        item { SettingsRow(Icons.Outlined.Dns, "Server", server.removePrefix("https://").removePrefix("http://")) { editingServer = true } }
         item { SettingsRow(Icons.Outlined.Download, "Export my data", "Chats, projects, files and memory as JSON") { exporter.launch("byak-export.json") } }
         item { OutlinedButton(onClick = { vm.logout() }, Modifier.fillMaxWidth()) { Icon(Icons.AutoMirrored.Outlined.Logout, null); Text(" Sign out") } }
         item { TextButton(onClick = { deleting = true }, Modifier.fillMaxWidth(), colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error)) { Text("Delete account and data") } }
@@ -63,6 +71,8 @@ private val playProducts get() = listOf(BuildConfig.PLAY_MONTHLY_PRODUCT_ID, Bui
     }
     if (deleting) ConfirmDialog("Delete your account?", "This permanently removes sessions, provider keys, chats, files, projects and memory." + if (sub.isPro) " Also cancel your subscription in Google Play to stop renewals." else "", "Delete permanently", onDismiss = { deleting = false }) { deleting = false; vm.deleteAccount() }
     if (editingProfile) ProfileDialog(state.profile?.name ?: session.name, state.profile?.customInstructions.orEmpty(), onDismiss = { editingProfile = false }) { name, instructions -> vm.saveProfile(name, instructions); editingProfile = false }
+    if (editingServer) ServerDialog(server, settings, onDismiss = { editingServer = false }) { changed -> editingServer = false; if (changed) vm.logout() }
+    if (appearance) AppearanceDialog(themeMode, dynamic, onDismiss = { appearance = false }) { mode, dyn -> scope.launch { settings.setThemeMode(mode); settings.setDynamicColor(dyn) }; appearance = false }
     if (changingPassword) PasswordDialog(onDismiss = { changingPassword = false }) { current, new -> vm.changePassword(current, new) { changingPassword = false } }
 }
 
@@ -84,6 +94,31 @@ private val playProducts get() = listOf(BuildConfig.PLAY_MONTHLY_PRODUCT_ID, Bui
             OutlinedTextField(current, { current = it }, label = { Text("Current password") }, singleLine = true, visualTransformation = PasswordVisualTransformation())
             OutlinedTextField(new, { new = it }, label = { Text("New password") }, singleLine = true, visualTransformation = PasswordVisualTransformation(), supportingText = { Text("At least 10 characters") })
             OutlinedTextField(confirm, { confirm = it }, label = { Text("Confirm new password") }, singleLine = true, visualTransformation = PasswordVisualTransformation(), isError = mismatch, supportingText = { if (mismatch) Text("Passwords don't match") })
+        } })
+}
+
+/** Lets people point the app at their own BYAK server. Changing it while signed in signs out, because sessions belong to a server. */
+@Composable fun ServerDialog(current: String, settings: SettingsStore, onDismiss: () -> Unit, onSaved: (changed: Boolean) -> Unit) {
+    val scope = rememberCoroutineScope(); var value by remember { mutableStateOf(current) }
+    val error = SettingsStore.validate(value, allowHttp = BuildConfig.DEBUG)
+    AlertDialog(onDismissRequest = onDismiss, title = { Text("BYAK server") },
+        confirmButton = { Button(onClick = { scope.launch { val next = value.trim().trimEnd('/'); settings.setServerUrl(next); onSaved(next != current.trimEnd('/')) } }, enabled = error == null && value.isNotBlank()) { Text("Save") } },
+        dismissButton = { Row { TextButton(onClick = { scope.launch { settings.setServerUrl(""); onSaved(BuildConfig.API_BASE_URL != current) } }) { Text("Reset") }; TextButton(onClick = onDismiss) { Text("Cancel") } } },
+        text = { Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("The address of the BYAK API this app talks to. Use your hosted API, or your own self-hosted server.", style = MaterialTheme.typography.bodySmall)
+            OutlinedTextField(value, { value = it }, label = { Text("Server URL") }, singleLine = true, placeholder = { Text("https://api.example.com") }, isError = error != null, supportingText = { error?.let { Text(it) } })
+        } })
+}
+
+@Composable private fun AppearanceDialog(mode: ThemeMode, dynamic: Boolean, onDismiss: () -> Unit, onSave: (ThemeMode, Boolean) -> Unit) {
+    var selected by remember { mutableStateOf(mode) }; var useDynamic by remember { mutableStateOf(dynamic) }
+    AlertDialog(onDismissRequest = onDismiss, title = { Text("Appearance") }, confirmButton = { Button(onClick = { onSave(selected, useDynamic) }) { Text("Apply") } }, dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+        text = { Column {
+            ThemeMode.entries.forEach { option -> Row(Modifier.fillMaxWidth().clickable { selected = option }, verticalAlignment = Alignment.CenterVertically) { RadioButton(selected == option, { selected = option }); Text(when (option) { ThemeMode.System -> "Follow system"; ThemeMode.Light -> "Light"; ThemeMode.Dark -> "Dark" }) } }
+            if (dynamicColorSupported) Row(Modifier.fillMaxWidth().padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) { Text("Dynamic color"); Text("Match your wallpaper (Material You)", style = MaterialTheme.typography.bodySmall) }
+                Switch(checked = useDynamic, onCheckedChange = { useDynamic = it })
+            }
         } })
 }
 

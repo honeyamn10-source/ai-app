@@ -56,7 +56,8 @@ The default repository can run with its local reference store; PostgreSQL, Redis
 **Backend (zero-dependency Node 22 API)**
 - Email + Google Sign-In, rotating refresh tokens with reuse detection, device list/revocation, password change, account deletion and full JSON data export
 - Server-encrypted BYOK connections (AES-256-GCM, masked keys, key rotation) for OpenAI, Anthropic, Gemini, OpenRouter, Groq, Mistral, DeepSeek, custom HTTPS OpenAI-compatible endpoints and (self-hosted) Ollama
-- True token streaming from every provider over SSE; stopping a response keeps the partial answer; regenerate and delete message
+- True token streaming from every provider over SSE; stopping a response keeps the partial answer; regenerate, edit & resend, delete message
+- Image attachments for vision models, web search in chat and automatic link reading with citations, prompt library with built-in templates
 - Prompts combine custom instructions, project instructions, opt-in memory and BM25 document retrieval with citations
 - Conversations with search, pin, archive, rename and move-to-project; Markdown/TXT/JSON exports
 - GitHub, Reddit and Brave web research, SSRF-safe URL reader (DNS-checked, size-capped)
@@ -65,7 +66,9 @@ The default repository can run with its local reference store; PostgreSQL, Redis
 
 **Android (Kotlin + Jetpack Compose)**
 - Automatic session refresh and Keystore-encrypted token storage
-- Streaming chat with Markdown, stop/regenerate/copy/share, citations and a live model picker
+- Streaming chat with Markdown, stop/regenerate/edit/copy/share, citations and a live model picker
+- Photo attachments, voice input, read-aloud answers, a Web toggle and a prompt library
+- Appearance (system/light/dark, Material You) and a configurable server address
 - Research with one-tap AI summaries, knowledge files, projects with instructions, provider management with key testing
 - BYAK Pro purchase flow with Google Play Billing, restore and subscription management
 - Memory, usage charts, devices, profile and custom instructions, data export

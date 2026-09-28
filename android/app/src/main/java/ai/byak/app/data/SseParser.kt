@@ -29,6 +29,7 @@ class SseParser {
             "content_delta" -> payload.optString("delta").takeIf { it.isNotEmpty() }?.let { StreamEvent.Delta(it) }
             "message_complete" -> StreamEvent.Complete(payload.toMessage())
             "error" -> StreamEvent.Failed(payload.optString("message").ifBlank { "Generation failed" })
+            "status" -> payload.optString("message").takeIf { it.isNotBlank() }?.let { StreamEvent.Status(it) }
             else -> null
         }
     }
@@ -36,10 +37,13 @@ class SseParser {
 
 internal fun JSONObject.toMessage(): ChatMessage {
     val citations = optJSONArray("citations")?.let { array ->
-        (0 until array.length()).map { array.getJSONObject(it) }.map { Citation(it.optInt("id"), it.optString("title"), it.optInt("chunk")) }
+        (0 until array.length()).map { array.getJSONObject(it) }.map { Citation(it.optInt("id"), it.optString("title"), it.optInt("chunk"), it.optString("kind", "document"), it.optString("url").ifBlank { null }) }
+    }.orEmpty()
+    val attachments = optJSONArray("attachments")?.let { array ->
+        (0 until array.length()).map { array.getJSONObject(it) }.map { AttachmentRef(it.optInt("index"), it.optString("mimeType")) }
     }.orEmpty()
     return ChatMessage(
         id = getString("id"), role = getString("role"), content = optString("content"),
-        status = optString("status", "complete"), model = optString("model").ifBlank { null }, citations = citations
+        status = optString("status", "complete"), model = optString("model").ifBlank { null }, citations = citations, attachments = attachments
     )
 }
