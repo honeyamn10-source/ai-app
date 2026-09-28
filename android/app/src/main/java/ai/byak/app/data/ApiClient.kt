@@ -24,7 +24,9 @@ import java.util.concurrent.TimeUnit
 class ApiException(message: String, val status: Int, val code: String? = null) : Exception(message)
 
 /** The server address comes from [SettingsStore] on every call, so changing it in the app takes effect immediately. */
-class ApiClient(private val settings: SettingsStore, private val sessions: SessionStore) {
+class ApiClient(private val settings: SettingsStore, private val sessions: SessionStore) : ByakApi {
+    override val isLocal = false
+
     private suspend fun base(): String = settings.currentServerUrl().trimEnd('/')
     private val jsonType = "application/json; charset=utf-8".toMediaType()
     private val client = OkHttpClient.Builder().connectTimeout(15, TimeUnit.SECONDS).readTimeout(120, TimeUnit.SECONDS).build()
@@ -96,67 +98,67 @@ class ApiClient(private val settings: SettingsStore, private val sessions: Sessi
         val data = request(path, "POST", body, false); val user = data.getJSONObject("user")
         return Session(data.getString("accessToken"), data.getString("refreshToken"), user.getString("name"), user.getString("email")).also { sessions.save(it) }
     }
-    suspend fun logout() { runCatching { request("/v1/auth/logout", "POST", JSONObject()) }; sessions.clear() }
-    suspend fun deleteAccount(): String? { val result = request("/v1/me", "DELETE"); sessions.clear(); return result.optString("notice").ifBlank { null } }
-    suspend fun profile(): Pair<Profile, Subscription> {
+    override suspend fun logout() { runCatching { request("/v1/auth/logout", "POST", JSONObject()) }; sessions.clear() }
+    override suspend fun deleteAccount(): String? { val result = request("/v1/me", "DELETE"); sessions.clear(); return result.optString("notice").ifBlank { null } }
+    override suspend fun profile(): Pair<Profile, Subscription> {
         val data = request("/v1/me")
         val profile = Profile(data.getString("name"), data.getString("email"), data.optBoolean("memoryEnabled"), data.optString("customInstructions"), data.optBoolean("hasPassword"))
         sessions.updateProfile(profile.name, profile.email)
         return profile to (data.optJSONObject("subscription")?.toSubscription() ?: Subscription.FREE)
     }
-    suspend fun updateProfile(name: String, customInstructions: String) { request("/v1/me", "PATCH", JSONObject().put("name", name).put("customInstructions", customInstructions)) }
-    suspend fun changePassword(current: String, new: String) { request("/v1/auth/password", "POST", JSONObject().put("currentPassword", current).put("newPassword", new)) }
-    suspend fun exportData(): String = execute("/v1/me/export")
-    suspend fun devices(): List<Device> = request("/v1/devices").getJSONArray("items").objects().map { Device(it.getString("id"), it.optString("device"), it.optString("lastUsedAt"), it.optBoolean("current")) }
-    suspend fun revokeDevice(id: String) { request("/v1/devices/${id.enc()}", "DELETE") }
+    override suspend fun updateProfile(name: String, customInstructions: String) { request("/v1/me", "PATCH", JSONObject().put("name", name).put("customInstructions", customInstructions)) }
+    override suspend fun changePassword(current: String, new: String) { request("/v1/auth/password", "POST", JSONObject().put("currentPassword", current).put("newPassword", new)) }
+    override suspend fun exportData(): String = execute("/v1/me/export")
+    override suspend fun devices(): List<Device> = request("/v1/devices").getJSONArray("items").objects().map { Device(it.getString("id"), it.optString("device"), it.optString("lastUsedAt"), it.optBoolean("current")) }
+    override suspend fun revokeDevice(id: String) { request("/v1/devices/${id.enc()}", "DELETE") }
 
     // ---------- providers ----------
-    suspend fun catalog(): List<CatalogProvider> = request("/v1/models/catalog", authenticated = false).getJSONArray("providers").objects().map {
+    override suspend fun catalog(): List<CatalogProvider> = request("/v1/models/catalog", authenticated = false).getJSONArray("providers").objects().map {
         CatalogProvider(it.getString("id"), it.getString("name"), it.optJSONArray("models")?.strings().orEmpty(), it.optBoolean("localOnly"), it.optBoolean("keyOptional"))
     }
-    suspend fun providers(): List<Provider> = request("/v1/providers").getJSONArray("items").objects().map { it.toProvider() }
-    suspend fun addProvider(type: String, apiKey: String, model: String, baseUrl: String = ""): Provider =
+    override suspend fun providers(): List<Provider> = request("/v1/providers").getJSONArray("items").objects().map { it.toProvider() }
+    override suspend fun addProvider(type: String, apiKey: String, model: String, baseUrl: String): Provider =
         request("/v1/providers", "POST", JSONObject().put("provider", type).put("apiKey", apiKey).put("defaultModel", model).put("baseUrl", baseUrl)).toProvider()
-    suspend fun updateProvider(id: String, defaultModel: String? = null, enabled: Boolean? = null, apiKey: String? = null): Provider {
+    override suspend fun updateProvider(id: String, defaultModel: String?, enabled: Boolean?, apiKey: String?): Provider {
         val body = JSONObject(); defaultModel?.let { body.put("defaultModel", it) }; enabled?.let { body.put("enabled", it) }; apiKey?.let { body.put("apiKey", it) }
         return request("/v1/providers/${id.enc()}", "PATCH", body).toProvider()
     }
-    suspend fun validateProvider(id: String) { request("/v1/providers/${id.enc()}/validate", "POST", JSONObject()) }
-    suspend fun providerModels(id: String): List<String> = request("/v1/providers/${id.enc()}/models").getJSONArray("items").strings()
-    suspend fun deleteProvider(id: String) { request("/v1/providers/${id.enc()}", "DELETE") }
+    override suspend fun validateProvider(id: String) { request("/v1/providers/${id.enc()}/validate", "POST", JSONObject()) }
+    override suspend fun providerModels(id: String): List<String> = request("/v1/providers/${id.enc()}/models").getJSONArray("items").strings()
+    override suspend fun deleteProvider(id: String) { request("/v1/providers/${id.enc()}", "DELETE") }
 
     // ---------- conversations ----------
-    suspend fun conversations(query: String = "", archived: Boolean = false): List<Conversation> =
+    override suspend fun conversations(query: String, archived: Boolean): List<Conversation> =
         request("/v1/conversations?archived=$archived" + (if (query.isNotBlank()) "&q=${query.enc()}" else "")).getJSONArray("items").objects().map { it.toConversation() }
-    suspend fun createConversation(providerId: String?, model: String, projectId: String? = null): Conversation {
+    override suspend fun createConversation(providerId: String?, model: String, projectId: String?): Conversation {
         val body = JSONObject().put("title", "New conversation").put("model", model)
         providerId?.let { body.put("providerId", it) }; projectId?.let { body.put("projectId", it) }
         return request("/v1/conversations", "POST", body).toConversation()
     }
-    suspend fun updateConversation(id: String, title: String? = null, pinned: Boolean? = null, archived: Boolean? = null, providerId: String? = null, model: String? = null): Conversation {
+    override suspend fun updateConversation(id: String, title: String?, pinned: Boolean?, archived: Boolean?, providerId: String?, model: String?): Conversation {
         val body = JSONObject(); title?.let { body.put("title", it) }; pinned?.let { body.put("pinned", it) }; archived?.let { body.put("archived", it) }
         providerId?.let { body.put("providerId", it) }; model?.let { body.put("model", it) }
         return request("/v1/conversations/${id.enc()}", "PATCH", body).toConversation()
     }
-    suspend fun deleteConversation(id: String) { request("/v1/conversations/${id.enc()}", "DELETE") }
-    suspend fun messages(id: String): List<ChatMessage> = request("/v1/conversations/${id.enc()}").getJSONArray("messages").objects().map { it.toMessage() }
-    suspend fun exportConversation(id: String): String = execute("/v1/exports/conversations/${id.enc()}?format=markdown")
+    override suspend fun deleteConversation(id: String) { request("/v1/conversations/${id.enc()}", "DELETE") }
+    override suspend fun messages(id: String): List<ChatMessage> = request("/v1/conversations/${id.enc()}").getJSONArray("messages").objects().map { it.toMessage() }
+    override suspend fun exportConversation(id: String): String = execute("/v1/exports/conversations/${id.enc()}?format=markdown")
 
-    fun streamMessage(conversationId: String, content: String, providerId: String?, model: String?, images: List<ImageDraft> = emptyList(), webSearch: Boolean = false): Flow<StreamEvent> {
+    override fun streamMessage(conversationId: String, content: String, providerId: String?, model: String?, images: List<ImageDraft>, webSearch: Boolean): Flow<StreamEvent> {
         val body = generationBody(providerId, model, webSearch).put("content", content)
         if (images.isNotEmpty()) body.put("attachments", JSONArray(images.map { JSONObject().put("type", "image").put("mimeType", it.mimeType).put("data", Base64.getEncoder().encodeToString(it.bytes)) }))
         return stream("/v1/conversations/${conversationId.enc()}/stream", body)
     }
-    fun regenerate(conversationId: String, providerId: String?, model: String?, webSearch: Boolean = false): Flow<StreamEvent> =
+    override fun regenerate(conversationId: String, providerId: String?, model: String?, webSearch: Boolean): Flow<StreamEvent> =
         stream("/v1/conversations/${conversationId.enc()}/regenerate", generationBody(providerId, model, webSearch))
-    fun editMessage(conversationId: String, messageId: String, content: String, providerId: String?, model: String?, webSearch: Boolean = false): Flow<StreamEvent> =
+    override fun editMessage(conversationId: String, messageId: String, content: String, providerId: String?, model: String?, webSearch: Boolean): Flow<StreamEvent> =
         stream("/v1/conversations/${conversationId.enc()}/edit", generationBody(providerId, model, webSearch).put("messageId", messageId).put("content", content))
     private fun generationBody(providerId: String?, model: String?, webSearch: Boolean): JSONObject {
         val body = JSONObject(); providerId?.let { body.put("providerId", it) }; model?.takeIf { it.isNotBlank() }?.let { body.put("model", it) }
         if (webSearch) body.put("webSearch", true)
         return body
     }
-    suspend fun attachment(conversationId: String, messageId: String, index: Int): ByteArray =
+    override suspend fun attachment(conversationId: String, messageId: String, index: Int): ByteArray =
         executeBytes("/v1/conversations/${conversationId.enc()}/messages/${messageId.enc()}/attachments/$index")
 
     /** Streams SSE events. Cancelling the collector cancels the HTTP call, which tells the server to stop generating. */
@@ -185,24 +187,24 @@ class ApiClient(private val settings: SettingsStore, private val sessions: Sessi
     }.flowOn(Dispatchers.IO)
 
     // ---------- projects, files, research ----------
-    suspend fun projects(): List<Project> = request("/v1/projects").getJSONArray("items").objects().map { it.toProject() }
-    suspend fun createProject(name: String, description: String, instructions: String = ""): Project =
+    override suspend fun projects(): List<Project> = request("/v1/projects").getJSONArray("items").objects().map { it.toProject() }
+    override suspend fun createProject(name: String, description: String, instructions: String): Project =
         request("/v1/projects", "POST", JSONObject().put("name", name).put("description", description).put("instructions", instructions)).toProject()
-    suspend fun updateProject(id: String, name: String, description: String, instructions: String): Project =
+    override suspend fun updateProject(id: String, name: String, description: String, instructions: String): Project =
         request("/v1/projects/${id.enc()}", "PATCH", JSONObject().put("name", name).put("description", description).put("instructions", instructions)).toProject()
-    suspend fun deleteProject(id: String) { request("/v1/projects/${id.enc()}", "DELETE") }
+    override suspend fun deleteProject(id: String) { request("/v1/projects/${id.enc()}", "DELETE") }
 
-    suspend fun research(query: String, source: String): List<ResearchResult> =
+    override suspend fun research(query: String, source: String): List<ResearchResult> =
         request("/v1/research", "POST", JSONObject().put("query", query).put("source", source)).getJSONArray("items").objects().map { ResearchResult(it.getString("title"), it.getString("url"), it.optString("summary")) }
-    suspend fun files(): List<UserFile> = request("/v1/files").getJSONArray("items").objects().map { it.toFile() }
-    suspend fun uploadText(name: String, mimeType: String, content: String, projectId: String? = null): UserFile {
+    override suspend fun files(): List<UserFile> = request("/v1/files").getJSONArray("items").objects().map { it.toFile() }
+    override suspend fun uploadText(name: String, mimeType: String, content: String, projectId: String?): UserFile {
         val body = JSONObject().put("name", name).put("mimeType", mimeType).put("content", content); projectId?.let { body.put("projectId", it) }
         return request("/v1/files", "POST", body).toFile()
     }
-    suspend fun deleteFile(id: String) { request("/v1/files/${id.enc()}", "DELETE") }
+    override suspend fun deleteFile(id: String) { request("/v1/files/${id.enc()}", "DELETE") }
 
     // ---------- compare ----------
-    suspend fun compare(content: String, targets: List<Pair<String, String>>): List<ComparisonResult> {
+    override suspend fun compare(content: String, targets: List<Pair<String, String>>): List<ComparisonResult> {
         val body = JSONObject().put("content", content).put("targets", JSONArray(targets.map { (providerId, model) -> JSONObject().put("providerId", providerId).put("model", model) }))
         return request("/v1/compare", "POST", body).getJSONArray("results").objects().map {
             ComparisonResult(it.optString("providerName"), it.optString("model"), it.optString("content"), it.nullableString("error"), it.optLong("ms"), it.optJSONObject("usage")?.optLong("outputTokens") ?: 0)
@@ -210,25 +212,25 @@ class ApiClient(private val settings: SettingsStore, private val sessions: Sessi
     }
 
     // ---------- prompt library ----------
-    suspend fun prompts(): Pair<List<SavedPrompt>, List<SavedPrompt>> {
+    override suspend fun prompts(): Pair<List<SavedPrompt>, List<SavedPrompt>> {
         val data = request("/v1/prompts")
         val mine = data.getJSONArray("items").objects().map { SavedPrompt(it.getString("id"), it.getString("title"), it.getString("content")) }
         val templates = data.optJSONArray("templates")?.objects().orEmpty().map { SavedPrompt(it.getString("id"), it.getString("title"), it.getString("content"), it.optString("category"), builtIn = true) }
         return mine to templates
     }
-    suspend fun savePrompt(id: String?, title: String, content: String) {
+    override suspend fun savePrompt(id: String?, title: String, content: String) {
         val body = JSONObject().put("title", title).put("content", content)
         if (id == null) request("/v1/prompts", "POST", body) else request("/v1/prompts/${id.enc()}", "PATCH", body)
     }
-    suspend fun deletePrompt(id: String) { request("/v1/prompts/${id.enc()}", "DELETE") }
+    override suspend fun deletePrompt(id: String) { request("/v1/prompts/${id.enc()}", "DELETE") }
 
     // ---------- memory, usage, billing ----------
-    suspend fun memory(): Pair<Boolean, List<Memory>> { val data = request("/v1/memory"); return data.optBoolean("enabled") to data.getJSONArray("items").objects().map { Memory(it.getString("id"), it.getString("content")) } }
-    suspend fun setMemoryEnabled(enabled: Boolean) { request("/v1/memory/settings", "PUT", JSONObject().put("enabled", enabled)) }
-    suspend fun addMemory(content: String) { request("/v1/memory", "POST", JSONObject().put("content", content)) }
-    suspend fun deleteMemory(id: String) { request("/v1/memory/${id.enc()}", "DELETE") }
-    suspend fun clearMemory() { request("/v1/memory", "DELETE") }
-    suspend fun usage(days: Int = 30): Usage {
+    override suspend fun memory(): Pair<Boolean, List<Memory>> { val data = request("/v1/memory"); return data.optBoolean("enabled") to data.getJSONArray("items").objects().map { Memory(it.getString("id"), it.getString("content")) } }
+    override suspend fun setMemoryEnabled(enabled: Boolean) { request("/v1/memory/settings", "PUT", JSONObject().put("enabled", enabled)) }
+    override suspend fun addMemory(content: String) { request("/v1/memory", "POST", JSONObject().put("content", content)) }
+    override suspend fun deleteMemory(id: String) { request("/v1/memory/${id.enc()}", "DELETE") }
+    override suspend fun clearMemory() { request("/v1/memory", "DELETE") }
+    override suspend fun usage(days: Int): Usage {
         val data = request("/v1/usage?days=$days")
         return Usage(
             data.optInt("requests"), data.optLong("inputTokens"), data.optLong("outputTokens"),
@@ -236,8 +238,8 @@ class ApiClient(private val settings: SettingsStore, private val sessions: Sessi
             data.getJSONArray("byDay").objects().map { DayUsage(it.getString("day"), it.optInt("requests"), it.optLong("tokens")) }
         )
     }
-    suspend fun subscription(): Subscription = request("/v1/subscription").toSubscription()
-    suspend fun verifyPurchases(tokens: List<String>): Subscription = request("/v1/billing/google/verify", "POST", JSONObject().put("purchaseTokens", JSONArray(tokens))).toSubscription()
+    override suspend fun subscription(): Subscription = request("/v1/subscription").toSubscription()
+    override suspend fun verifyPurchases(tokens: List<String>): Subscription = request("/v1/billing/google/verify", "POST", JSONObject().put("purchaseTokens", JSONArray(tokens))).toSubscription()
 }
 
 private fun String.enc(): String = URLEncoder.encode(this, "UTF-8")

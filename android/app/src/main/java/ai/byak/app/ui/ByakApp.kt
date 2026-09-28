@@ -7,6 +7,7 @@ import android.content.Context
 import android.content.ContextWrapper
 import ai.byak.app.ByakApplication
 import ai.byak.app.data.Session
+import ai.byak.app.data.SessionStore
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -40,12 +41,12 @@ fun Context.findActivity(): Activity? = when (this) { is Activity -> this; is Co
 @Composable fun ByakApp(app: ByakApplication) {
     val session by app.sessionStore.session.collectAsState(initial = null)
     val current = session
-    if (current == null) AuthScreen(app.api, app.settings) else MainShell(app, current)
+    if (current == null) AuthScreen(app) else MainShell(app, current)
 }
 
 @Composable private fun MainShell(app: ByakApplication, session: Session) {
     // Keyed by account so signing in as someone else never shows the previous account's chats, research or plan.
-    val vm: ByakViewModel = viewModel(key = "byak:${session.email}", factory = viewModelFactory { initializer { ByakViewModel(app.api, app.billing) } })
+    val vm: ByakViewModel = viewModel(key = "byak:${SessionStore.isOnDevice(session)}:${session.email}", factory = viewModelFactory { initializer { ByakViewModel(app.apiFor(session), app.billing) } })
     val state by vm.state.collectAsState()
     var destination by rememberSaveable { mutableStateOf(Destination.Home) }
     val drawer = rememberDrawerState(DrawerValue.Closed)
