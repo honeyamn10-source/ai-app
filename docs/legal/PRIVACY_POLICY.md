@@ -4,7 +4,7 @@
 **Last updated:** 1 September 2026
 **Application:** BYAK AI (Google Play) — package `ai.byak.app`
 **Operator:** [[LEGAL NAME OF OPERATOR]]
-**Contact:** [byakai@yahoomail.com](mailto:byakai@yahoomail.com)
+**Contact:** [byakai@yahoo.com](mailto:byakai@yahoo.com)
 **Address for formal notices:** [[POSTAL ADDRESS OF OPERATOR]]
 
 > **Before publishing:** replace every `[[...]]` placeholder with the operator's real legal
@@ -153,7 +153,7 @@ BYAK AI developer. Skipping sign-in leaves the app fully usable.
 ### 5.5 Email
 
 The "Report this response" button in the app opens **your own email app** with a message
-pre-addressed to [byakai@yahoomail.com](mailto:byakai@yahoomail.com). Nothing is sent until you
+pre-addressed to [byakai@yahoo.com](mailto:byakai@yahoo.com). Nothing is sent until you
 press send in your email app. The same applies to "Help & feedback" in Settings.
 
 ## 6. The BYAK AI website
@@ -264,6 +264,6 @@ the updated policy.
 **BYAK AI — Privacy**
 [[LEGAL NAME OF OPERATOR]]
 [[POSTAL ADDRESS OF OPERATOR]]
-Email: [byakai@yahoomail.com](mailto:byakai@yahoomail.com)
+Email: [byakai@yahoo.com](mailto:byakai@yahoo.com)
 
 Use this address for privacy questions, data requests, and to report a security issue.

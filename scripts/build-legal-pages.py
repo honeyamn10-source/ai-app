@@ -32,7 +32,7 @@ PAGES = [
 ]
 
 PLACEHOLDER = re.compile(r"\[\[[^\]]+\]\]")
-EMAIL = "byakai@yahoomail.com"
+EMAIL = "byakai@yahoo.com"
 
 CSS = """
 :root{--bg:#05060a;--panel:#0b0d14;--ink:#e9ecf5;--muted:#9aa3bd;--line:#1c2130;

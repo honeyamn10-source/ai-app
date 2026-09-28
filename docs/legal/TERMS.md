@@ -4,7 +4,7 @@
 **Last updated:** 1 September 2026
 **Application:** BYAK AI (Google Play) — package `ai.byak.app`
 **Operator:** [[LEGAL NAME OF OPERATOR]]
-**Contact:** [byakai@yahoomail.com](mailto:byakai@yahoomail.com)
+**Contact:** [byakai@yahoo.com](mailto:byakai@yahoo.com)
 **Address for formal notices:** [[POSTAL ADDRESS OF OPERATOR]]
 
 > **Before publishing:** replace every `[[...]]` placeholder with the operator's real legal name
@@ -208,7 +208,7 @@ Before filing a claim, please contact us — most disputes are resolved quickly 
 - **Not professional advice.** Nothing in the Service is legal, medical, tax or financial advice.
 - **Entire agreement.** These Terms and the Privacy Policy are the entire agreement between us
   about the Service, and supersede any earlier statement.
-- **Contact.** Questions about these Terms: [byakai@yahoomail.com](mailto:byakai@yahoomail.com).
+- **Contact.** Questions about these Terms: [byakai@yahoo.com](mailto:byakai@yahoo.com).
 
 ## 20. Operator
 

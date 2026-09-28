@@ -12,13 +12,13 @@ Application id `ai.byak.app`, `targetSdk` 36.
 >
 > Consequences:
 >
-> - A bundle built from `main` as-is is `versionCode 6`. **Play will reject it.** Before
->   releasing from `main`, set `versionCode` to **35 or higher** in
->   `android/app/build.gradle.kts`.
-> - The **Publish to Google Play** workflow enforces this. Set the repository variable
->   `BYAK_MIN_VERSION_CODE` to the highest versionCode Play has already accepted, and raise
->   it after every successful upload. The build fails rather than uploading a duplicate or
->   lower versionCode.
+> - A bundle built from `main` as-is is `versionCode 6`. **Play will reject it.** This branch
+>   ships `versionCode 35` / `versionName 3.1.0` so it is both numerically above the 34 already
+>   on Play and visibly above `3.0.1` in the store listing. Raise both after every upload.
+> - The **Publish to Google Play** workflow enforces the numeric floor. Set the repository
+>   variable `BYAK_MIN_VERSION_CODE` to the highest versionCode Play has already accepted — `34`
+>   for now — and raise it after every successful upload. The build fails rather than uploading
+>   a duplicate or lower versionCode.
 > - Decide deliberately which line you are shipping. `main` is the newer architecture
 >   (runs entirely on the phone, no BYAK server). The `release/byak-v3.0.1-*` branches are the
 >   older server-backed line that produced the builds already on Play.
@@ -85,10 +85,11 @@ Settings → Secrets and variables → Actions → **Variables**:
 
 | Variable | Value | Why |
 |---|---|---|
-| `BYAK_SUPPORT_EMAIL` | `byakai@yahoomail.com` | where "Report response" and "Help & feedback" go. Required by Play's AI-content policy. |
+| `BYAK_SUPPORT_EMAIL` | `byakai@yahoo.com` | where "Report response" and "Help & feedback" go. Required by Play's AI-content policy. |
 | `BYAK_PRIVACY_POLICY_URL` | the **policy page** URL, not the homepage | Play store listing + the in-app link |
 | `BYAK_TERMS_URL` | the terms page URL | in-app terms link |
-| `BYAK_UPLOAD_CERT_SHA256` | the upload certificate fingerprint | pins the key; the build fails on a mismatch |
+| `BYAK_UPLOAD_CERT_SHA256` | `76:A5:13:51:EC:A1:53:AF:49:C2:D6:20:26:C6:6A:D8:43:5B:F1:02:3B:15:54:93:C1:1B:68:2D:A8:4F:02:94` | pins the upload key; the build fails on a mismatch |
+| `BYAK_MIN_VERSION_CODE` | `34` to start, then the highest code Play has accepted | the workflow refuses to upload a duplicate or lower versionCode |
 | `BYAK_GOOGLE_WEB_CLIENT_ID` | optional override | the app already embeds the Web client `1077439001893-rnboa31…` from project `byak-ai`. Never put a client *secret* in the app. |
 
 `BYAK_PRIVACY_POLICY_URL` and `BYAK_TERMS_URL` are injected into `BuildConfig` and the Settings
