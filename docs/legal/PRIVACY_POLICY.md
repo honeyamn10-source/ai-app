@@ -3,14 +3,9 @@
 **Effective date:** 1 September 2026
 **Last updated:** 1 September 2026
 **Application:** BYAK AI (Google Play) — package `ai.byak.app`
-**Operator:** [[LEGAL NAME OF OPERATOR]]
+**Operator:** Bittu Sharma
 **Contact:** [byakai@yahoo.com](mailto:byakai@yahoo.com)
-**Address for formal notices:** [[POSTAL ADDRESS OF OPERATOR]]
-
-> **Before publishing:** replace every `[[...]]` placeholder with the operator's real legal
-> name and postal address, and confirm the contact address is monitored. Google Play rejects
-> privacy policies that have no identifiable operator or no working contact. Nothing in this
-> document may be published while a `[[...]]` placeholder remains.
+**Address for formal notices:** 55 Pioneer Lane, Vaughan, Ontario L4L 2J2, Canada
 
 ---
 
@@ -262,8 +257,8 @@ the updated policy.
 ## 14. Contact
 
 **BYAK AI — Privacy**
-[[LEGAL NAME OF OPERATOR]]
-[[POSTAL ADDRESS OF OPERATOR]]
+Bittu Sharma
+55 Pioneer Lane, Vaughan, Ontario L4L 2J2, Canada
 Email: [byakai@yahoo.com](mailto:byakai@yahoo.com)
 
 Use this address for privacy questions, data requests, and to report a security issue.

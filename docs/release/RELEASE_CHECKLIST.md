@@ -86,8 +86,8 @@ Settings → Secrets and variables → Actions → **Variables**:
 | Variable | Value | Why |
 |---|---|---|
 | `BYAK_SUPPORT_EMAIL` | `byakai@yahoo.com` | where "Report response" and "Help & feedback" go. Required by Play's AI-content policy. |
-| `BYAK_PRIVACY_POLICY_URL` | the **policy page** URL, not the homepage | Play store listing + the in-app link |
-| `BYAK_TERMS_URL` | the terms page URL | in-app terms link |
+| `BYAK_PRIVACY_POLICY_URL` | `https://honeyamn10-source.github.io/honeyamn10-source/byak-ai/privacy/` | Play store listing + the in-app link. **Already set and live.** |
+| `BYAK_TERMS_URL` | `https://honeyamn10-source.github.io/honeyamn10-source/byak-ai/terms/` | in-app terms link. Already set and live. |
 | `BYAK_UPLOAD_CERT_SHA256` | `76:A5:13:51:EC:A1:53:AF:49:C2:D6:20:26:C6:6A:D8:43:5B:F1:02:3B:15:54:93:C1:1B:68:2D:A8:4F:02:94` | pins the upload key; the build fails on a mismatch |
 | `BYAK_MIN_VERSION_CODE` | `34` to start, then the highest code Play has accepted | the workflow refuses to upload a duplicate or lower versionCode |
 | `BYAK_GOOGLE_WEB_CLIENT_ID` | optional override | the app already embeds the Web client `1077439001893-rnboa31…` from project `byak-ai`. Never put a client *secret* in the app. |
@@ -106,14 +106,33 @@ python3 scripts/build-legal-pages.py          # writes site/legal/privacy.html a
 ```
 
 The build **fails** while any `[[...]]` operator placeholder is unresolved, because Play rejects
-a policy with no operator name or address. Fill in the operator's legal name, postal address and
-governing jurisdiction, then re-run. Upload `site/legal/privacy.html` to whatever serves your
-public site and publish it at a stable, login-free URL.
+a policy with no operator name or address. The operator details are filled in:
+
+| Field | Value |
+|---|---|
+| Legal name | Bittu Sharma |
+| Postal address | 55 Pioneer Lane, Vaughan, Ontario L4L 2J2, Canada |
+| Governing jurisdiction | Ontario, Canada |
+| Contact | byakai@yahoo.com |
+
+The rendered pages are published from the `honeyamn10-source` profile repository under
+`website/byak-ai/`, which GitHub Pages serves at:
+
+- <https://honeyamn10-source.github.io/honeyamn10-source/byak-ai/privacy/>
+- <https://honeyamn10-source.github.io/honeyamn10-source/byak-ai/terms/>
+
+Both return 200 with no login and no cookie wall, which is what Play requires. Re-render with
+`python3 scripts/build-legal-pages.py`, copy the output to `website/byak-ai/{privacy,terms}/index.html`,
+and push to trigger the Pages deploy.
+
+`byak.site.je` cannot be used: it resolves to an old host that answers every path with a redirect
+to `https://www.safebrowse.io/warn.html` and fails the TLS handshake, so it serves no policy.
 
 Check the result:
 
 ```bash
-curl -sS -o /dev/null -w '%{http_code}\n' https://<your-host>/privacy   # must be 200
+curl -sS -o /dev/null -w '%{http_code}\n' \
+  https://honeyamn10-source.github.io/honeyamn10-source/byak-ai/privacy/   # must be 200
 ```
 
 ## 4. Google Sign-In (Google Cloud project `byak-ai`)
@@ -133,8 +152,14 @@ curl -sS -o /dev/null -w '%{http_code}\n' https://<your-host>/privacy   # must b
 - Add your account under **Setup → License testing** so purchases are free and renew quickly.
 - In on-device mode Pro is granted from the Play purchase on the phone
   (`LocalApi.kt` → `BillingManager.acknowledge`), so the Android Publisher API service account
-  is **not** required for the app. It is only needed by the optional self-hosted backend
+  is **not** required for the app itself. It is only needed by the optional self-hosted backend
   (`docs/billing/GOOGLE_PLAY_BILLING.md`).
+- **Publishing is a separate concern.** The *Publish to Google Play* workflow needs a service
+  account with the **Release Manager** role on Play Console → Users and permissions, granted the
+  scope "See and perform actions against releases" (`androidpublisher`). Save its JSON and set it
+  as the `BYAK_PLAY_SERVICE_ACCOUNT_JSON` secret. Add the service account address in Play Console →
+  Users and permissions → Invite users, or the upload is rejected. This is the only Play credential
+  still missing.
 
 ## 6. Store listing and policy forms
 

@@ -3,19 +3,18 @@
 **Effective date:** 1 September 2026
 **Last updated:** 1 September 2026
 **Application:** BYAK AI (Google Play) — package `ai.byak.app`
-**Operator:** [[LEGAL NAME OF OPERATOR]]
+**Operator:** Bittu Sharma
 **Contact:** [byakai@yahoo.com](mailto:byakai@yahoo.com)
-**Address for formal notices:** [[POSTAL ADDRESS OF OPERATOR]]
+**Address for formal notices:** 55 Pioneer Lane, Vaughan, Ontario L4L 2J2, Canada
 
-> **Before publishing:** replace every `[[...]]` placeholder with the operator's real legal name
-> and postal address, and have a qualified lawyer review this document for the launch
+> **Before publishing:** have a qualified lawyer review this document for the launch
 > jurisdictions. Terms of Service are a contract, not a description.
 
 ---
 
 ## 1. Agreement
 
-These Terms are a binding agreement between you and [[LEGAL NAME OF OPERATOR]] ("BYAK", "we",
+These Terms are a binding agreement between you and Bittu Sharma ("BYAK", "we",
 "us") for the BYAK AI Android application and the BYAK AI website (together, the "Service").
 By installing, opening or using the Service you accept these Terms. If you do not accept them,
 do not use the Service. If you use the Service on behalf of an organisation, you confirm you are
@@ -193,8 +192,8 @@ Sections that by their nature should survive termination survive it, including s
 
 ## 18. Governing law and disputes
 
-These Terms are governed by the laws of [[GOVERNING JURISDICTION]], without regard to conflict
-of laws rules. The courts of [[GOVERNING JURISDICTION]] have exclusive jurisdiction, except that
+These Terms are governed by the laws of Ontario, Canada, without regard to conflict
+of laws rules. The courts of Ontario, Canada have exclusive jurisdiction, except that
 consumers may bring claims in the courts where they live, and nothing here removes any mandatory
 consumer right or the right to bring a claim in your place of residence.
 
@@ -212,5 +211,5 @@ Before filing a claim, please contact us — most disputes are resolved quickly 
 
 ## 20. Operator
 
-[[LEGAL NAME OF OPERATOR]]
-[[POSTAL ADDRESS OF OPERATOR]]
+Bittu Sharma
+55 Pioneer Lane, Vaughan, Ontario L4L 2J2, Canada
