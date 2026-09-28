@@ -56,14 +56,15 @@ import kotlinx.coroutines.launch
                         Text("Runs on your phone. Your chats and API keys stay on this device.", style = MaterialTheme.typography.bodySmall)
                     }
                     error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
-                    Button(onClick = {
-                        if (!GoogleSignIn.configured) error = "Google Sign-In isn't enabled in this build."
-                        else attempt { GoogleSignIn.signIn(context.findActivity() ?: context)?.let { account -> app.local.setIdentity(account.name, account.email); app.sessionStore.save(Session(SessionStore.ON_DEVICE, SessionStore.ON_DEVICE, account.name, account.email)) } }
+                    // Hidden until a Web client ID is configured, so users never see a button that can't work.
+                    if (GoogleSignIn.configured) Button(onClick = {
+                        attempt { GoogleSignIn.signIn(context.findActivity() ?: context)?.let { account -> app.local.setIdentity(account.name, account.email); app.sessionStore.save(Session(SessionStore.ON_DEVICE, SessionStore.ON_DEVICE, account.name, account.email)) } }
                     }, Modifier.fillMaxWidth().height(52.dp), enabled = !busy) {
                         if (busy) CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp, color = MaterialTheme.colorScheme.onPrimary)
                         else { Icon(Icons.Outlined.AccountCircle, null); Spacer(Modifier.width(8.dp)); Text("Continue with Google") }
                     }
-                    OutlinedButton(onClick = { startOnDevice("You", "") }, Modifier.fillMaxWidth(), enabled = !busy) { Text("Continue without an account") }
+                    if (GoogleSignIn.configured) OutlinedButton(onClick = { startOnDevice("You", "") }, Modifier.fillMaxWidth(), enabled = !busy) { Text("Continue without an account") }
+                    else Button(onClick = { startOnDevice("You", "") }, Modifier.fillMaxWidth().height(52.dp), enabled = !busy) { Text("Get started") }
                     TextButton(onClick = { useServer = true; error = null }, Modifier.align(Alignment.CenterHorizontally)) { Icon(Icons.Outlined.Dns, null, Modifier.size(16.dp)); Spacer(Modifier.width(6.dp)); Text("I have a BYAK server account") }
                 }
                 AnimatedVisibility(useServer) { ServerSignIn(app, onBack = { useServer = false }) }

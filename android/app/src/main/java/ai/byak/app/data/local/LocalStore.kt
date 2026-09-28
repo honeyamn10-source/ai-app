@@ -18,10 +18,20 @@ import java.util.UUID
 class LocalStore(context: Context) {
     private val file = File(context.filesDir, "byak_local.json")
     val attachmentsDir = File(context.filesDir, "attachments").apply { mkdirs() }
+    /** Large per-record payloads (knowledge-file chunks) live outside the main document so it stays small. */
+    val blobsDir = File(context.filesDir, "blobs").apply { mkdirs() }
     private val lock = Mutex()
     private var root: JSONObject? = null
 
-    private fun load(): JSONObject = root ?: (runCatching { JSONObject(file.readText()) }.getOrNull() ?: JSONObject()).also { root = it }
+    private fun load(): JSONObject = root ?: readFromDisk().also { root = it }
+    private fun readFromDisk(): JSONObject {
+        if (!file.exists()) return JSONObject()
+        return runCatching { JSONObject(file.readText()) }.getOrElse {
+            // Never overwrite unreadable data with an empty store: keep the file aside so it can be recovered.
+            file.copyTo(File(file.parentFile, "${file.name}.corrupt-${System.currentTimeMillis()}"), overwrite = true)
+            JSONObject()
+        }
+    }
     private fun save(data: JSONObject) {
         val next = File(file.parentFile, "${file.name}.next")
         next.writeText(data.toString()); next.renameTo(file)
@@ -32,7 +42,11 @@ class LocalStore(context: Context) {
     /** Mutates and persists. */
     suspend fun <T> write(block: (Db) -> T): T = lock.withLock { withContext(Dispatchers.IO) { val data = load(); val result = block(Db(data)); save(data); result } }
 
-    suspend fun wipe() = lock.withLock { withContext(Dispatchers.IO) { root = JSONObject(); file.delete(); attachmentsDir.listFiles()?.forEach { it.delete() } } }
+    suspend fun wipe() = lock.withLock { withContext(Dispatchers.IO) { root = JSONObject(); file.delete(); attachmentsDir.listFiles()?.forEach { it.delete() }; blobsDir.listFiles()?.forEach { it.delete() } } }
+
+    fun writeBlob(name: String, text: String) { val target = File(blobsDir, name); val next = File(blobsDir, "$name.next"); next.writeText(text); next.renameTo(target) }
+    fun readBlob(name: String): String? = File(blobsDir, name).takeIf { it.exists() }?.readText()
+    fun deleteBlob(name: String) { File(blobsDir, name).delete() }
 
     class Db(private val data: JSONObject) {
         val meta: JSONObject get() = data.optJSONObject("meta") ?: JSONObject().also { data.put("meta", it) }

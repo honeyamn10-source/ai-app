@@ -198,6 +198,8 @@ import kotlinx.coroutines.launch
 
 @Composable private fun MessageBubble(message: ChatMessage, vm: ByakViewModel, speaker: Speaker, canRegenerate: Boolean, canEdit: Boolean, status: String?) {
     val user = message.role == "user"; val clipboard = LocalClipboardManager.current; val context = LocalContext.current
+    var reporting by remember { mutableStateOf(false) }
+    if (reporting) ReportDialog(message, onDismiss = { reporting = false })
     Row(Modifier.fillMaxWidth(), horizontalArrangement = if (user) Arrangement.End else Arrangement.Start) {
         Surface(color = if (user) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant, contentColor = if (user) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant, shape = RoundedCornerShape(20.dp), modifier = Modifier.widthIn(max = 680.dp)) {
             Column(Modifier.padding(start = 14.dp, end = 14.dp, top = 12.dp, bottom = if (user && !canEdit) 12.dp else 4.dp)) {
@@ -235,6 +237,7 @@ import kotlinx.coroutines.launch
                         Icon(if (speaker.speakingId == message.id) Icons.Outlined.StopCircle else Icons.AutoMirrored.Outlined.VolumeUp, if (speaker.speakingId == message.id) "Stop reading" else "Read aloud", Modifier.size(18.dp))
                     }
                     if (canRegenerate) IconButton(onClick = vm::regenerate, Modifier.size(36.dp)) { Icon(Icons.Outlined.Replay, "Regenerate", Modifier.size(18.dp)) }
+                    IconButton(onClick = { reporting = true }, Modifier.size(36.dp)) { Icon(Icons.Outlined.Flag, "Report this response", Modifier.size(18.dp)) }
                 }
                 if (canRegenerate) FollowUps(message, vm)
                 if (user && canEdit) Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
@@ -243,6 +246,30 @@ import kotlinx.coroutines.launch
             }
         }
     }
+}
+
+/**
+ * Lets people flag an AI response (required by Google Play's AI-generated content policy).
+ * The report opens the user's email app addressed to the developer, so nothing is sent silently.
+ */
+@Composable private fun ReportDialog(message: ChatMessage, onDismiss: () -> Unit) {
+    val context = LocalContext.current
+    val reasons = listOf("Offensive or harmful", "Sexual or violent content", "Dangerous advice", "Inaccurate or misleading", "Other")
+    var reason by remember { mutableStateOf(reasons[0]) }; var note by remember { mutableStateOf("") }
+    AlertDialog(onDismissRequest = onDismiss, icon = { Icon(Icons.Outlined.Flag, null) }, title = { Text("Report this response") },
+        text = { Column {
+            reasons.forEach { r -> Row(Modifier.fillMaxWidth().clickable { reason = r }, verticalAlignment = Alignment.CenterVertically) { RadioButton(reason == r, { reason = r }); Text(r) } }
+            OutlinedTextField(note, { note = it }, Modifier.fillMaxWidth().padding(top = 8.dp), label = { Text("Details (optional)") }, maxLines = 4)
+            Text("Opens your email app with the response attached. Answers come from the AI provider you chose.", style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 8.dp))
+        } },
+        confirmButton = { Button(onClick = {
+            val body = "Reason: $reason\nDetails: ${note.ifBlank { "-" }}\nModel: ${message.model ?: "unknown"}\nApp version: ${ai.byak.app.BuildConfig.VERSION_NAME}\n\n--- Reported response ---\n${message.content.take(4000)}"
+            val email = ai.byak.app.BuildConfig.SUPPORT_EMAIL
+            val intent = if (email.isNotBlank()) Intent(Intent.ACTION_SENDTO, Uri.parse("mailto:")).putExtra(Intent.EXTRA_EMAIL, arrayOf(email)) else Intent(Intent.ACTION_SEND).setType("text/plain")
+            runCatching { context.startActivity(Intent.createChooser(intent.putExtra(Intent.EXTRA_SUBJECT, "BYAK AI response report: $reason").putExtra(Intent.EXTRA_TEXT, body), "Send report")) }
+            onDismiss()
+        }) { Text("Send report") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } })
 }
 
 /** One-tap follow-ups under the latest answer. */

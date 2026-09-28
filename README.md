@@ -101,7 +101,7 @@ The reference API uses an encrypted-permissions local JSON store so it runs imme
 
 ## Google Sign-In setup
 
-The app ships with web client ID `1077439001893-…apps.googleusercontent.com` (override with `-PBYAK_GOOGLE_WEB_CLIENT_ID=…`). For the account picker to work on a Play-installed build, the same Google Cloud project also needs an **Android** OAuth client for package `ai.byak.app` with the **SHA-1 of the Play App Signing key** (Play Console → Test and release → App integrity → App signing). Add the upload key's SHA-1 too if you install builds outside Play.
+The app ships with the **Web application** client ID `1077439001893-rnboa31….apps.googleusercontent.com` from Google Cloud project `byak-ai` (override with `-PBYAK_GOOGLE_WEB_CLIENT_ID=…`). For the account picker to work on a Play-installed build, the same Google Cloud project also needs an **Android** OAuth client for package `ai.byak.app` with the **SHA-1 of the Play App Signing key** (Play Console → Test and release → App integrity → App signing). Add the upload key's SHA-1 too if you install builds outside Play.
 
 ## Run Android
 

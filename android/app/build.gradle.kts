@@ -6,26 +6,42 @@ plugins {
 
 android {
     namespace = "ai.byak.app"
-    compileSdk = 35
+    compileSdk = 36
     defaultConfig {
         applicationId = "ai.byak.app"
         minSdk = 26
-        targetSdk = 35
-        versionCode = 5
-        versionName = "0.5.0"
+        targetSdk = 36
+        versionCode = 6
+        versionName = "1.0.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         fun prop(name: String, fallback: String) = (project.findProperty(name) as String?)?.takeIf { it.isNotBlank() } ?: System.getenv(name)?.takeIf { it.isNotBlank() } ?: fallback
         buildConfigField("String", "API_BASE_URL", "\"${prop("BYAK_API_URL", "http://10.0.2.2:8787")}\"")
-        buildConfigField("String", "GOOGLE_WEB_CLIENT_ID", "\"${prop("BYAK_GOOGLE_WEB_CLIENT_ID", "1077439001893-00b1peg0tcq60bcteadooohsbovdurfs.apps.googleusercontent.com")}\"")
+        // Must be the *Web application* OAuth client of the same Google Cloud project (not the Android client).
+        buildConfigField("String", "GOOGLE_WEB_CLIENT_ID", "\"${prop("BYAK_GOOGLE_WEB_CLIENT_ID", "1077439001893-rnboa31frshmo5iopmkbvasd41lv8hqe.apps.googleusercontent.com")}\"")
         // Play Console: one subscription product with a base plan per billing period.
+        // Store listing essentials shown in Settings; set them for production builds.
+        buildConfigField("String", "SUPPORT_EMAIL", "\"${prop("BYAK_SUPPORT_EMAIL", "")}\"")
+        buildConfigField("String", "PRIVACY_POLICY_URL", "\"${prop("BYAK_PRIVACY_POLICY_URL", "")}\"")
+        buildConfigField("String", "TERMS_URL", "\"${prop("BYAK_TERMS_URL", "")}\"")
         buildConfigField("String", "PLAY_PRODUCT_ID", "\"${prop("BYAK_PLAY_PRODUCT_ID", "byak_pro")}\"")
         buildConfigField("String", "PLAY_MONTHLY_BASE_PLAN", "\"${prop("BYAK_PLAY_MONTHLY_BASE_PLAN", "monthly")}\"")
         buildConfigField("String", "PLAY_YEARLY_BASE_PLAN", "\"${prop("BYAK_PLAY_YEARLY_BASE_PLAN", "yearly")}\"")
     }
     buildFeatures { compose = true; buildConfig = true }
+    // Upload key for Play. Never commit the keystore: CI decodes it from a secret (see docs/release).
+    val keystorePath = System.getenv("BYAK_KEYSTORE_FILE")
+    signingConfigs {
+        if (!keystorePath.isNullOrBlank()) create("release") {
+            storeFile = file(keystorePath)
+            storePassword = System.getenv("BYAK_KEYSTORE_PASSWORD")
+            keyAlias = System.getenv("BYAK_KEY_ALIAS")
+            keyPassword = System.getenv("BYAK_KEY_PASSWORD")
+        }
+    }
     buildTypes {
         debug { applicationIdSuffix = ".debug"; versionNameSuffix = "-debug" }
         release {
+            signingConfigs.findByName("release")?.let { signingConfig = it }
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
