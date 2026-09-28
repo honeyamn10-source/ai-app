@@ -259,6 +259,24 @@ def main() -> int:
                 f"{src_name}: {len(found)} unresolved placeholder(s): {', '.join(found)}"
             )
 
+        # A relative link between the two pages only works if both sit in the same
+        # directory once deployed, and a .md target is copied through verbatim and
+        # can never resolve on a static host. Catch both here rather than shipping
+        # a 404 from the published page.
+        for target in re.findall(r"\]\(([^)\s]+)\)", md):
+            if target.startswith(("http://", "https://", "mailto:", "#")):
+                continue
+            if target.endswith(".md"):
+                problems.append(
+                    f"{src_name}: links to '{target}'. A .md file is not published; "
+                    f"use an absolute https:// URL to the rendered page."
+                )
+            elif not target.endswith((".html", "/")):
+                problems.append(
+                    f"{src_name}: relative link '{target}' may not resolve at the "
+                    f"published URL. Prefer an absolute https:// URL."
+                )
+
         body = markdown_to_html(md)
         page = PAGE.format(
             title=html.escape(title),
