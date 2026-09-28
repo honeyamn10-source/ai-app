@@ -6,19 +6,20 @@ plugins {
 
 android {
     namespace = "ai.byak.app"
-    compileSdk = 35
+    compileSdk = 36
     defaultConfig {
         applicationId = "ai.byak.app"
         minSdk = 26
-        targetSdk = 35
-        versionCode = 2
-        versionName = "0.2.0"
+        targetSdk = 36
+        versionCode = 33
+        versionName = "3.0.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         fun prop(name: String, fallback: String) = (project.findProperty(name) as String?)?.takeIf { it.isNotBlank() } ?: System.getenv(name)?.takeIf { it.isNotBlank() } ?: fallback
-        buildConfigField("String", "API_BASE_URL", "\"${prop("BYAK_API_URL", "http://10.0.2.2:8787")}\"")
+        buildConfigField("String", "API_BASE_URL", "\"${prop("BYAK_API_URL", "https://api.byak.ai/")}\"")
         buildConfigField("String", "GOOGLE_WEB_CLIENT_ID", "\"${prop("BYAK_GOOGLE_WEB_CLIENT_ID", "")}\"")
-        buildConfigField("String", "PLAY_MONTHLY_PRODUCT_ID", "\"${prop("BYAK_PLAY_MONTHLY_PRODUCT_ID", "monthly")}\"")
-        buildConfigField("String", "PLAY_ANNUAL_PRODUCT_ID", "\"${prop("BYAK_PLAY_ANNUAL_PRODUCT_ID", "yearly")}\"")
+        buildConfigField("String", "PLAY_SUBSCRIPTION_PRODUCT_ID", "\"${prop("BYAK_PLAY_SUBSCRIPTION_PRODUCT_ID", "byak_pro")}\"")
+        buildConfigField("String", "PLAY_MONTHLY_BASE_PLAN_ID", "\"${prop("BYAK_PLAY_MONTHLY_BASE_PLAN_ID", "monthly")}\"")
+        buildConfigField("String", "PLAY_ANNUAL_BASE_PLAN_ID", "\"${prop("BYAK_PLAY_ANNUAL_BASE_PLAN_ID", "yearly")}\"")
     }
     buildFeatures { compose = true; buildConfig = true }
     buildTypes {
