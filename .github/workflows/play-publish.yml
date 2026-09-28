@@ -183,6 +183,9 @@ jobs:
 
       - uses: ruby/setup-ruby@v1
         with:
+          # Pinned explicitly: the repo has no .ruby-version, and setup-ruby
+          # fails outright rather than guessing a version.
+          ruby-version: "3.3"
           bundler-cache: true
 
       - name: Download the signed bundle
