@@ -2,6 +2,20 @@
 
 Notable repository changes are recorded here.
 
+## 0.5.0
+
+### Fixed
+- Login and "Continue with Google" failed on real phones: the app needed a BYAK server that wasn't hosted
+  anywhere. BYAK now runs entirely on the phone by default, so no server is required.
+
+### Added
+- On-device mode: chats, files, projects, memory, prompts and usage stored on the phone; API keys encrypted
+  with the Android Keystore; OpenAI-compatible, Anthropic and Gemini called directly (streaming, images).
+- Google Sign-In that works without a server (uses the configured web client ID) and clearer errors when the
+  app's SHA-1 isn't registered in Google Cloud.
+- Web search in on-device mode via Wikipedia, or Brave Search with your own key.
+- Pro in on-device mode comes from the Google Play purchase on the phone.
+
 ## 0.4.0
 
 ### Changed
