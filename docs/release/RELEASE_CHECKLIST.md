@@ -14,14 +14,14 @@ Version 1.0.0 (versionCode 6), `targetSdk` 36.
 ## 2. App configuration (GitHub → Actions → **Variables**)
 | Variable | Why |
 |---|---|
-| `BYAK_GOOGLE_WEB_CLIENT_ID` | Google Sign-In. Must be the **Web application** OAuth client (see below). The button stays hidden until it is set. |
+| `BYAK_GOOGLE_WEB_CLIENT_ID` | Optional override. The app already uses the Web client `1077439001893-rnboa31…` from project `byak-ai`. Never put the client *secret* in the app. |
 | `BYAK_SUPPORT_EMAIL` | Where "Report response" and "Help & feedback" emails go. Needed for Play's AI-content policy. |
 | `BYAK_PRIVACY_POLICY_URL` | Privacy policy link in Settings (also required in the store listing). |
 | `BYAK_TERMS_URL` | Optional terms of service link. |
 
 ## 3. Google Sign-In (Google Cloud project `byak-ai`)
 1. **Android client**: package `ai.byak.app`, SHA-1 = Play Console → Test and release → App integrity → **App signing key certificate**. Add a second Android client with the **upload key** SHA-1 if you install builds outside Play.
-2. **Web application client**: create one (no redirect URIs needed) and put its Client ID in `BYAK_GOOGLE_WEB_CLIENT_ID`.
+2. **Web application client**: `1077439001893-rnboa31frshmo5iopmkbvasd41lv8hqe` (built into the app). No redirect URIs needed.
 3. OAuth consent screen: app name, support email, logo, and **publish** it (otherwise only test users can sign in).
 
 ## 4. Billing

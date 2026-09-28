@@ -17,7 +17,7 @@ android {
         fun prop(name: String, fallback: String) = (project.findProperty(name) as String?)?.takeIf { it.isNotBlank() } ?: System.getenv(name)?.takeIf { it.isNotBlank() } ?: fallback
         buildConfigField("String", "API_BASE_URL", "\"${prop("BYAK_API_URL", "http://10.0.2.2:8787")}\"")
         // Must be the *Web application* OAuth client of the same Google Cloud project (not the Android client).
-        buildConfigField("String", "GOOGLE_WEB_CLIENT_ID", "\"${prop("BYAK_GOOGLE_WEB_CLIENT_ID", "")}\"")
+        buildConfigField("String", "GOOGLE_WEB_CLIENT_ID", "\"${prop("BYAK_GOOGLE_WEB_CLIENT_ID", "1077439001893-rnboa31frshmo5iopmkbvasd41lv8hqe.apps.googleusercontent.com")}\"")
         // Play Console: one subscription product with a base plan per billing period.
         // Store listing essentials shown in Settings; set them for production builds.
         buildConfigField("String", "SUPPORT_EMAIL", "\"${prop("BYAK_SUPPORT_EMAIL", "")}\"")
