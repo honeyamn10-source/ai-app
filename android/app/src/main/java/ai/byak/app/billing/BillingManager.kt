@@ -21,7 +21,7 @@ import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 
-data class PlanOffer(val productId: String, val title: String, val price: String, val details: ProductDetails, val offerToken: String)
+data class PlanOffer(val productId: String, val basePlanId: String, val title: String, val price: String, val details: ProductDetails, val offerToken: String)
 
 sealed interface PurchaseOutcome {
     data class Purchased(val tokens: List<String>) : PurchaseOutcome
@@ -54,19 +54,32 @@ class BillingManager(context: Context) : PurchasesUpdatedListener {
         result.await()
     }
 
-    suspend fun offers(productIds: List<String>): List<PlanOffer> {
-        if (productIds.isEmpty() || !ready()) return emptyList()
-        val params = QueryProductDetailsParams.newBuilder().setProductList(productIds.map {
-            QueryProductDetailsParams.Product.newBuilder().setProductId(it).setProductType(BillingClient.ProductType.SUBS).build()
-        }).build()
-        val details: List<ProductDetails> = client.queryProductDetails(params).productDetailsList ?: emptyList()
-        return details.mapNotNull { product ->
-            val offers = product.subscriptionOfferDetails.orEmpty()
-            // Base plan (no offerId) first; promotional offers can be added later deliberately.
-            val offer = offers.firstOrNull { it.offerId == null } ?: offers.firstOrNull() ?: return@mapNotNull null
-            val price = offer.pricingPhases.pricingPhaseList.lastOrNull()?.formattedPrice ?: return@mapNotNull null
-            PlanOffer(product.productId, product.name, price, product, offer.offerToken)
-        }.sortedBy { productIds.indexOf(it.productId) }
+    suspend fun offers(productId: String, basePlanOrder: List<String>): List<PlanOffer> {
+        if (productId.isBlank() || basePlanOrder.isEmpty() || !ready()) return emptyList()
+        val params = QueryProductDetailsParams.newBuilder().setProductList(
+            listOf(
+                QueryProductDetailsParams.Product.newBuilder()
+                    .setProductId(productId)
+                    .setProductType(BillingClient.ProductType.SUBS)
+                    .build()
+            )
+        ).build()
+        val details = client.queryProductDetails(params).productDetailsList.orEmpty()
+        return details.flatMap { product ->
+            product.subscriptionOfferDetails.orEmpty()
+                .filter { it.offerId == null && it.basePlanId in basePlanOrder }
+                .mapNotNull { offer ->
+                    val price = offer.pricingPhases.pricingPhaseList.lastOrNull()?.formattedPrice ?: return@mapNotNull null
+                    PlanOffer(
+                        productId = product.productId,
+                        basePlanId = offer.basePlanId,
+                        title = product.name,
+                        price = price,
+                        details = product,
+                        offerToken = offer.offerToken
+                    )
+                }
+        }.sortedBy { basePlanOrder.indexOf(it.basePlanId) }
     }
 
     /** Opens the Play purchase sheet. The account id binds the purchase to this BYAK user server-side. */
