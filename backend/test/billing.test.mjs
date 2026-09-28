@@ -9,7 +9,7 @@ const { createBilling } = await import('../src/billing.mjs');
 
 const { privateKey, publicKey } = generateKeyPairSync('rsa', { modulusLength: 2048 });
 const serviceAccount = JSON.stringify({ client_email: 'play@byak.iam.gserviceaccount.com', private_key: privateKey.export({ type: 'pkcs8', format: 'pem' }), token_uri: 'https://oauth2.googleapis.com/token' });
-const play = { packageName: 'ai.byak.app', serviceAccountJson: serviceAccount, monthlyProductId: 'monthly', annualProductId: 'yearly', rtdnToken: 'rtdn-secret' };
+const play = { packageName: 'ai.byak.app', serviceAccountJson: serviceAccount, productId: 'byak_pro', monthlyBasePlanId: 'monthly', yearlyBasePlanId: 'yearly', rtdnToken: 'rtdn-secret' };
 const DAY = 86400000;
 
 function fakeGoogle(state) {
@@ -36,10 +36,10 @@ async function setup(clock = Date.now()) {
   const state = { purchases: {}, acknowledged: false };
   const google = fakeGoogle(state); let time = clock;
   const billing = createBilling({ store, fetchImpl: google.fetchImpl, now: () => time, play });
-  const purchase = (userId, { productId = 'monthly', expiresIn = 30 * DAY, subscriptionState = 'SUBSCRIPTION_STATE_ACTIVE', ack = 'ACKNOWLEDGEMENT_STATE_PENDING', autoRenew = true, account = billing.accountIdFor(userId), linked } = {}) => () => ({
+  const purchase = (userId, { productId = 'byak_pro', basePlan = 'monthly', offerId, expiresIn = 30 * DAY, subscriptionState = 'SUBSCRIPTION_STATE_ACTIVE', ack = 'ACKNOWLEDGEMENT_STATE_PENDING', autoRenew = true, account = billing.accountIdFor(userId), linked } = {}) => () => ({
     subscriptionState, acknowledgementState: state.acknowledged ? 'ACKNOWLEDGEMENT_STATE_ACKNOWLEDGED' : ack, latestOrderId: 'GPA.1234', linkedPurchaseToken: linked,
     externalAccountIdentifiers: account ? { obfuscatedExternalAccountId: account } : undefined,
-    lineItems: [{ productId, expiryTime: new Date(time + expiresIn).toISOString(), autoRenewingPlan: { autoRenewEnabled: autoRenew } }]
+    lineItems: [{ productId, offerDetails: { basePlanId: basePlan, offerId }, expiryTime: new Date(time + expiresIn).toISOString(), autoRenewingPlan: { autoRenewEnabled: autoRenew } }]
   });
   return { store, state, billing, google, purchase, advance: ms => { time += ms; } };
 }
@@ -87,7 +87,7 @@ test('real-time notifications update status; cancelled keeps access until expiry
 
 test('voided purchases revoke access immediately', async () => {
   const { billing, state, purchase } = await setup();
-  state.purchases['tok-3'] = purchase('user-1', { productId: 'yearly', expiresIn: 365 * DAY });
+  state.purchases['tok-3'] = purchase('user-1', { basePlan: 'yearly', expiresIn: 365 * DAY });
   assert.equal((await billing.verify('user-1', 'tok-3')).plan, 'annual');
   const voided = { message: { data: Buffer.from(JSON.stringify({ packageName: 'ai.byak.app', voidedPurchaseNotification: { purchaseToken: 'tok-3' } })).toString('base64') } };
   await billing.handleNotification(voided, 'rtdn-secret');
@@ -98,12 +98,22 @@ test('upgrades supersede the linked purchase and renewals refresh lazily', async
   const { billing, state, purchase, advance, store } = await setup();
   state.purchases['old'] = purchase('user-1', { expiresIn: 10 * DAY });
   await billing.verify('user-1', 'old');
-  state.purchases['new'] = purchase('user-1', { productId: 'yearly', expiresIn: 365 * DAY, linked: 'old' });
+  state.purchases['new'] = purchase('user-1', { basePlan: 'yearly', expiresIn: 365 * DAY, linked: 'old' });
   assert.equal((await billing.verify('user-1', 'new')).plan, 'annual');
-  assert.equal(store.data.subscriptions.find(x => x.productId === 'monthly').status, 'replaced');
+  assert.equal(store.data.subscriptions.find(x => x.basePlanId === 'monthly').status, 'replaced');
 
   // After expiry, a renewing subscription is re-checked with Google instead of silently dropping to free.
-  advance(366 * DAY); state.purchases['new'] = purchase('user-1', { productId: 'yearly', expiresIn: 365 * DAY });
+  advance(366 * DAY); state.purchases['new'] = purchase('user-1', { basePlan: 'yearly', expiresIn: 365 * DAY });
   await billing.refresh('user-1');
   assert.equal(billing.entitlement('user-1').plan, 'annual');
+});
+
+test('maps Play Console base plans and free-trial offers of byak_pro', async () => {
+  const { billing, state, purchase, store } = await setup();
+  state.purchases['trial'] = purchase('user-1', { offerId: 'monthly-7day-freetrail', expiresIn: 7 * DAY });
+  const result = await billing.verify('user-1', 'trial');
+  assert.equal(result.plan, 'monthly'); assert.equal(result.productId, 'byak_pro'); assert.equal(result.basePlanId, 'monthly');
+  assert.equal(store.data.subscriptions[0].offerId, 'monthly-7day-freetrail');
+  state.purchases['odd'] = purchase('user-2', { basePlan: 'weekly' });
+  await assert.rejects(billing.verify('user-2', 'odd'), { status: 400 });
 });

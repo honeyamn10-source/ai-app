@@ -26,6 +26,8 @@ data class SavedPrompt(val id: String, val title: String, val content: String, v
 }
 /** One row of the Free vs Pro comparison, served by the backend so limits stay in one place. */
 data class ProHighlight(val key: String, val title: String, val free: String, val pro: String)
+/** One model's answer in a side-by-side comparison. */
+data class ComparisonResult(val providerName: String, val model: String, val content: String, val error: String?, val ms: Long, val outputTokens: Long)
 data class Device(val id: String, val device: String, val lastUsedAt: String, val current: Boolean)
 data class ModelUsage(val provider: String, val model: String, val requests: Int, val inputTokens: Long, val outputTokens: Long)
 data class DayUsage(val day: String, val requests: Int, val tokens: Long)
@@ -34,11 +36,13 @@ data class Profile(val name: String, val email: String, val memoryEnabled: Boole
 data class Subscription(
     val plan: String, val tier: String, val status: String, val expiresAt: String?, val autoRenewing: Boolean,
     val productId: String?, val billingAccountId: String, val verificationAvailable: Boolean, val limits: Map<String, Int>,
-    val webSearchesToday: Int = 0, val imagesToday: Int = 0, val highlights: List<ProHighlight> = emptyList()
+    val webSearchesToday: Int = 0, val imagesToday: Int = 0, val highlights: List<ProHighlight> = emptyList(),
+    val basePlanId: String? = null, val comparisonsToday: Int = 0
 ) {
     val isPro get() = tier == "pro"
     val webSearchesLeft get() = ((limits["webSearchesPerDay"] ?: 0) - webSearchesToday).coerceAtLeast(0)
     val imagesLeft get() = ((limits["imagesPerDay"] ?: 0) - imagesToday).coerceAtLeast(0)
+    val comparisonsLeft get() = ((limits["comparisonsPerDay"] ?: 0) - comparisonsToday).coerceAtLeast(0)
     companion object { val FREE = Subscription("free", "free", "active", null, false, null, "", false, emptyMap()) }
 }
 

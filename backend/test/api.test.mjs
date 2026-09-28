@@ -278,21 +278,22 @@ test('free plan: daily web search and image allowances, then a clear upgrade pro
   fake.on('https://api.openai.com/v1/chat/completions', openaiOk('ok'));
   const { token, conversation } = await chatWith('openai', 'sk-test-1234567890');
   const ask = body => json(`/v1/conversations/${conversation.id}/messages`, { method: 'POST', token, body });
-  for (let i = 0; i < 3; i++) assert.equal((await ask({ content: `search ${i}`, webSearch: true })).status, 201);
+  for (let i = 0; i < 10; i++) assert.equal((await ask({ content: `search ${i}`, webSearch: true })).status, 201);
   const blocked = await ask({ content: 'one more', webSearch: true });
   assert.equal(blocked.status, 402);
   const error = (await blocked.json()).error;
-  assert.equal(error.code, 'plan_limit'); assert.match(error.message, /free web searches.*BYAK Pro raises this to 200/);
+  assert.equal(error.code, 'plan_limit'); assert.match(error.message, /free web searches \(10 per day\).*BYAK Pro raises this to 200/);
   assert.equal((await ask({ content: 'no web is still fine' })).status, 201);
 
   const image = { type: 'image', mimeType: 'image/png', data: PNG };
-  assert.equal((await ask({ content: 'pics', attachments: [image, image, image, image] })).status, 201);
+  for (let i = 0; i < 2; i++) assert.equal((await ask({ content: 'pics', attachments: [image, image, image, image] })).status, 201);
+  assert.equal((await ask({ content: 'pics', attachments: [image, image, image] })).status, 201);
   const tooMany = await ask({ content: 'pics', attachments: [image, image] });
   assert.equal(tooMany.status, 402); assert.match((await tooMany.json()).error.message, /1 left, this needs 2/);
 
   const plan = await json('/v1/subscription', { token }).then(r => r.json());
-  assert.deepEqual(plan.usageToday, { webSearches: 3, images: 4 });
-  assert.equal(plan.limits.webSearchesPerDay, 3); assert.ok(plan.highlights.some(h => h.key === 'webSearchesPerDay'));
+  assert.deepEqual(plan.usageToday, { webSearches: 10, images: 11, comparisons: 0 });
+  assert.equal(plan.limits.webSearchesPerDay, 10); assert.equal(plan.limits.imagesPerDay, 12); assert.ok(plan.highlights.some(h => h.key === 'webSearchesPerDay'));
 });
 
 test('free plan keeps a shorter conversation memory and fewer saved prompts', async () => {
@@ -306,4 +307,21 @@ test('free plan keeps a shorter conversation memory and fewer saved prompts', as
   for (let i = 0; i < 5; i++) assert.equal((await json('/v1/prompts', { method: 'POST', token, body: { title: `p${i}`, content: 'x' } })).status, 201);
   const sixth = await json('/v1/prompts', { method: 'POST', token, body: { title: 'p6', content: 'x' } });
   assert.equal(sixth.status, 402); assert.match((await sixth.json()).error.message, /5 saved prompts/);
+});
+
+test('compare sends one question to two models; free plan allows 2 per day', async () => {
+  fake.on('https://api.openai.com/v1/chat/completions', openaiOk('OpenAI answer'));
+  fake.on('https://api.anthropic.com/v1/messages', () => new Response(JSON.stringify({ error: { message: 'overloaded' } }), { status: 529 }));
+  const { accessToken: token } = await account();
+  const a = await json('/v1/providers', { method: 'POST', token, body: { provider: 'openai', apiKey: 'sk-test-1234567890' } }).then(r => r.json());
+  const b = await json('/v1/providers', { method: 'POST', token, body: { provider: 'anthropic', apiKey: 'sk-ant-123456789' } }).then(r => r.json());
+  const compare = () => json('/v1/compare', { method: 'POST', token, body: { content: 'Which is faster?', targets: [{ providerId: a.id, model: 'gpt-4.1-mini' }, { providerId: b.id, model: 'claude-sonnet-5' }] } });
+  const first = await compare(); assert.equal(first.status, 200);
+  const { results } = await first.json();
+  assert.equal(results[0].content, 'OpenAI answer'); assert.equal(results[0].model, 'gpt-4.1-mini');
+  assert.equal(results[1].content, ''); assert.match(results[1].error, /Anthropic.*overloaded/);
+  assert.equal((await compare()).status, 200);
+  const third = await compare(); assert.equal(third.status, 402); assert.match((await third.json()).error.message, /model comparisons \(2 per day\)/);
+  assert.equal((await json('/v1/compare', { method: 'POST', token, body: { content: 'x', targets: [{ providerId: a.id }] } })).status, 400);
+  assert.equal((await json('/v1/subscription', { token }).then(r => r.json())).usageToday.comparisons, 2);
 });

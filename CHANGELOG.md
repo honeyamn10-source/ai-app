@@ -2,6 +2,19 @@
 
 Notable repository changes are recorded here.
 
+## 0.4.0
+
+### Changed
+- Billing now matches Play Console: one subscription `byak_pro` with base plans `monthly` and `yearly`
+  (free-trial offers are detected automatically).
+- Free plan: web search raised to 10 per day and photo questions to 12 per day.
+
+### Added
+- Compare two models side by side (Free 2 per day, Pro 100 per day).
+- Monthly subscribers can switch to yearly in the app; unused time is credited by Google Play.
+- Yearly plan shows its live saving ("Save 17%") and per-month price.
+- One-tap follow-ups under answers: Summarize, Simplify, More detail, Translate, Continue.
+
 ## 0.3.0
 
 ### BYAK Pro

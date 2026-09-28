@@ -5,6 +5,9 @@ package ai.byak.app.ui
 import android.content.Intent
 import android.net.Uri
 import ai.byak.app.BuildConfig
+import ai.byak.app.billing.PlanOffer
+import ai.byak.app.billing.perMonth
+import ai.byak.app.billing.yearlySavingsPercent
 import ai.byak.app.data.ProHighlight
 import ai.byak.app.data.Session
 import ai.byak.app.data.SettingsStore
@@ -35,7 +38,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-private val playProducts get() = listOf(BuildConfig.PLAY_MONTHLY_PRODUCT_ID, BuildConfig.PLAY_ANNUAL_PRODUCT_ID)
+private val playBasePlans get() = listOf(BuildConfig.PLAY_YEARLY_BASE_PLAN, BuildConfig.PLAY_MONTHLY_BASE_PLAN)
 
 // ---------- Settings ----------
 @Composable fun SettingsScreen(session: Session, state: UiState, vm: ByakViewModel, settings: SettingsStore, navigate: (Destination) -> Unit) {
@@ -130,8 +133,8 @@ fun perkLine(title: String, value: String, separator: String): androidx.compose.
 }
 /** Used until the server's list arrives (and by older servers that don't send one). */
 val defaultHighlights = listOf(
-    ProHighlight("webSearchesPerDay", "Live web search in chat", "3 per day", "200 per day"),
-    ProHighlight("imagesPerDay", "Ask about photos", "5 images per day", "500 per day"),
+    ProHighlight("webSearchesPerDay", "Live web search in chat", "10 per day", "200 per day"),
+    ProHighlight("imagesPerDay", "Ask about photos", "12 images per day", "500 per day"),
     ProHighlight("historyMessages", "Conversation memory", "Last 20 messages", "Last 100 messages"),
     ProHighlight("ragChunks", "Document search depth", "4 excerpts per answer", "10 excerpts per answer"),
     ProHighlight("projects", "Projects", "3", "200"),
@@ -143,7 +146,7 @@ val defaultHighlights = listOf(
 @Composable fun PlanScreen(state: UiState, vm: ByakViewModel) {
     val context = LocalContext.current; val sub = state.subscription
     val highlights = sub.highlights.ifEmpty { defaultHighlights }
-    LaunchedEffect(Unit) { vm.loadPlans(playProducts) }
+    LaunchedEffect(Unit) { vm.loadPlans(BuildConfig.PLAY_PRODUCT_ID, playBasePlans) }
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(20.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
         item {
             Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer), shape = RoundedCornerShape(24.dp)) {
@@ -170,36 +173,44 @@ val defaultHighlights = listOf(
                 LimitBar("Photo questions", sub.imagesToday, sub.limits["imagesPerDay"] ?: 0)
             } }
         }
+        val monthlyOffer = state.offers.firstOrNull { it.basePlanId == BuildConfig.PLAY_MONTHLY_BASE_PLAN }
+        val yearlyOffer = state.offers.firstOrNull { it.basePlanId == BuildConfig.PLAY_YEARLY_BASE_PLAN }
+        val savings = yearlySavingsPercent(monthlyOffer, yearlyOffer)
         if (!sub.isPro) {
             if (state.offers.isEmpty()) item {
                 Text(if (state.busy) "Loading prices from Google Play…" else "Plans are unavailable right now. Make sure this app was installed from Google Play and you're signed in to the Play Store.", color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
-            items(state.offers, key = { it.productId }) { offer ->
-                val annual = offer.productId == BuildConfig.PLAY_ANNUAL_PRODUCT_ID
-                Card(onClick = { context.findActivity()?.let { vm.buy(it, offer) } }, shape = RoundedCornerShape(20.dp), colors = CardDefaults.cardColors(containerColor = if (annual) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant)) {
-                    Column(Modifier.padding(18.dp).fillMaxWidth()) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Column(Modifier.weight(1f)) {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Text(if (annual) "Yearly" else "Monthly", fontWeight = FontWeight.Bold, fontSize = 18.sp)
-                                    if (annual) { Spacer(Modifier.width(8.dp)); Surface(color = MaterialTheme.colorScheme.primary, shape = RoundedCornerShape(8.dp)) { Text("BEST VALUE", Modifier.padding(horizontal = 6.dp, vertical = 2.dp), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onPrimary) } }
-                                }
-                                Text(if (offer.trial != null) "${offer.trial}, then ${offer.price} per ${if (annual) "year" else "month"}" else "${offer.price} per ${if (annual) "year" else "month"}")
-                            }
-                        }
-                        Button(onClick = { context.findActivity()?.let { vm.buy(it, offer) } }, Modifier.fillMaxWidth().padding(top = 12.dp)) {
-                            Text(offer.trial?.let { "Start ${it.removeSuffix(" free trial")} free trial" } ?: "Subscribe")
-                        }
-                    }
-                }
-            }
+            items(state.offers, key = { it.basePlanId }) { offer -> OfferCard(offer, offer == yearlyOffer, savings) { context.findActivity()?.let { vm.buy(it, offer) } } }
             if (!sub.verificationAvailable) item { Text("Note: this server hasn't enabled purchase verification yet, so a purchase can't be activated until it does.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error) }
-        } else item {
-            OutlinedButton(onClick = { runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://play.google.com/store/account/subscriptions?sku=${sub.productId.orEmpty()}&package=${context.packageName}"))) } }, Modifier.fillMaxWidth()) { Text("Manage subscription in Google Play") }
+        } else {
+            // Monthly subscribers can move to yearly; Google Play credits the unused part of the month.
+            if (sub.basePlanId == BuildConfig.PLAY_MONTHLY_BASE_PLAN && yearlyOffer != null) item {
+                OfferCard(yearlyOffer, true, savings, switching = true) { context.findActivity()?.let { vm.buy(it, yearlyOffer) } }
+            }
+            item {
+                OutlinedButton(onClick = { runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://play.google.com/store/account/subscriptions?sku=${sub.productId ?: BuildConfig.PLAY_PRODUCT_ID}&package=${context.packageName}"))) } }, Modifier.fillMaxWidth()) { Text("Manage subscription in Google Play") }
+            }
         }
         item { PlanComparison(highlights) }
         item { TextButton(onClick = { vm.restorePurchases() }, Modifier.fillMaxWidth(), enabled = !state.busy) { Text("Restore purchases") } }
         item { Text("Payment is charged to your Google Play account. Subscriptions renew automatically until cancelled in Google Play. Free trials convert to a paid subscription unless cancelled before they end. Your provider API usage is billed separately by each provider.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+    }
+}
+
+@Composable private fun OfferCard(offer: PlanOffer, yearly: Boolean, savings: Int?, switching: Boolean = false, onBuy: () -> Unit) {
+    val period = if (yearly) "year" else "month"
+    Card(onClick = onBuy, shape = RoundedCornerShape(20.dp), colors = CardDefaults.cardColors(containerColor = if (yearly) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant)) {
+        Column(Modifier.padding(18.dp).fillMaxWidth()) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(if (switching) "Switch to yearly" else if (yearly) "Yearly" else "Monthly", fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                if (yearly) { Spacer(Modifier.width(8.dp)); Surface(color = MaterialTheme.colorScheme.primary, shape = RoundedCornerShape(8.dp)) { Text(savings?.let { "SAVE $it%" } ?: "BEST VALUE", Modifier.padding(horizontal = 6.dp, vertical = 2.dp), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onPrimary) } }
+            }
+            Text(if (offer.trial != null && !switching) "${offer.trial}, then ${offer.price} per $period" else "${offer.price} per $period")
+            if (yearly) perMonth(offer)?.let { Text("Just $it a month, billed yearly", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+            Button(onClick = onBuy, Modifier.fillMaxWidth().padding(top = 12.dp)) {
+                Text(when { switching -> "Switch and save"; offer.trial != null -> "Start ${offer.trial.removeSuffix(" free trial")} free trial"; else -> "Subscribe" })
+            }
+        }
     }
 }
 

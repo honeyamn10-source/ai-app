@@ -26,7 +26,9 @@ data class UiState(
     val drafts: List<ImageDraft> = emptyList(), val webSearch: Boolean = false, val editing: ChatMessage? = null,
     val generationStatus: String? = null, val composerPrefill: String? = null,
     // prompt library
-    val prompts: List<SavedPrompt> = emptyList(), val templates: List<SavedPrompt> = emptyList()
+    val prompts: List<SavedPrompt> = emptyList(), val templates: List<SavedPrompt> = emptyList(),
+    // compare
+    val comparing: Boolean = false, val comparison: List<ComparisonResult> = emptyList(), val comparisonQuestion: String = ""
 )
 
 class ByakViewModel(private val api: ApiClient, private val billing: BillingManager) : ViewModel() {
@@ -228,6 +230,16 @@ class ByakViewModel(private val api: ApiClient, private val billing: BillingMana
     fun removeFile(id: String) = task("File deleted") { api.deleteFile(id); val list = api.files(); update { copy(files = list) } }
     fun reportError(message: String) = update { copy(error = message) }
 
+    // ---------- compare ----------
+    fun compare(question: String, first: Pair<String, String>, second: Pair<String, String>) = viewModelScope.launch {
+        update { copy(comparing = true, comparison = emptyList(), comparisonQuestion = question, error = null) }
+        try { val results = api.compare(question, listOf(first, second)); update { copy(comparison = results) } }
+        catch (e: CancellationException) { throw e }
+        catch (e: ApiException) { failed(e) }
+        catch (e: Exception) { update { copy(error = e.message ?: "Comparison failed") } }
+        finally { update { copy(comparing = false) }; runCatching { api.subscription() }.onSuccess { sub -> update { copy(subscription = sub) } } }
+    }
+
     // ---------- prompt library ----------
     fun loadPrompts() = task { val (mine, templates) = api.prompts(); update { copy(prompts = mine, templates = templates) } }
     fun savePrompt(id: String?, title: String, content: String) = task("Prompt saved") { api.savePrompt(id, title, content); val (mine, templates) = api.prompts(); update { copy(prompts = mine, templates = templates) } }
@@ -254,13 +266,15 @@ class ByakViewModel(private val api: ApiClient, private val billing: BillingMana
     fun deleteAccount() = task { api.deleteAccount()?.let { message -> notice(message) } }
 
     // ---------- billing ----------
-    fun loadPlans(productIds: List<String>) = task {
+    fun loadPlans(productId: String, basePlans: List<String>) = task {
         val sub = api.subscription(); update { copy(subscription = sub) }
-        val offers = runCatching { billing.offers(productIds) }.getOrDefault(emptyList()); update { copy(offers = offers) }
+        val offers = runCatching { billing.offers(productId, basePlans) }.getOrDefault(emptyList()); update { copy(offers = offers) }
     }
-    fun buy(activity: Activity, offer: PlanOffer) {
-        val accountId = state.value.subscription.billingAccountId
-        billing.launch(activity, offer, accountId)?.let { message -> update { copy(error = message) } }
+    /** Buys a plan, or switches an active subscription to another base plan (e.g. monthly → yearly). */
+    fun buy(activity: Activity, offer: PlanOffer) = viewModelScope.launch {
+        val sub = state.value.subscription
+        val replacing = if (sub.isPro && sub.basePlanId != offer.basePlanId) runCatching { billing.ownedPurchaseTokens().firstOrNull() }.getOrNull() else null
+        billing.launch(activity, offer, sub.billingAccountId, replacing)?.let { message -> update { copy(error = message) } }
     }
     fun restorePurchases() = task {
         val tokens = billing.ownedPurchaseTokens()

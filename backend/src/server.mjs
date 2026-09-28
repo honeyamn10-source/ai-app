@@ -10,7 +10,7 @@ import { builtInPrompts } from './prompts.mjs';
 import { githubSearch, readUrl, redditSearch, webSearch } from './research.mjs';
 import { createBilling, plans, proHighlights } from './billing.mjs';
 
-const VERSION = '0.3.0';
+const VERSION = '0.4.0';
 export const store = await new Store().init();
 export const billing = createBilling({ store });
 const attempts = new Map();
@@ -36,19 +36,20 @@ function enforceLimit(userId, key, current) {
 }
 
 // Daily allowances (web search, images) are counted from audit events so they reset at midnight UTC.
-const dailyActions = { webSearchesPerDay: 'chat.web_search', imagesPerDay: 'chat.images' };
+const dailyActions = { webSearchesPerDay: 'chat.web_search', imagesPerDay: 'chat.images', comparisonsPerDay: 'chat.compare' };
+const dailyLabels = { webSearchesPerDay: n => `web searches (${n} per day)`, imagesPerDay: n => `photo questions (${n} images per day)`, comparisonsPerDay: n => `model comparisons (${n} per day)` };
 const dailyUsed = (userId, key) => { const today = now().slice(0, 10); return store.filter('audit', x => x.userId === userId && x.action === dailyActions[key] && x.createdAt.startsWith(today)).reduce((sum, x) => sum + (x.metadata?.count || 1), 0); };
 function consumeDaily(userId, key, amount = 1) {
   if (!amount) return;
   const { limits, tier } = billing.entitlement(userId); const used = dailyUsed(userId, key); const left = Math.max(limits[key] - used, 0);
   if (used + amount > limits[key]) {
-    const what = key === 'webSearchesPerDay' ? `web searches (${limits[key]} per day)` : `photo questions (${limits[key]} images per day)`;
+    const what = dailyLabels[key](limits[key]);
     throw httpError(402, tier === 'free' ? `You've used today's free ${what}${left ? ` — ${left} left, this needs ${amount}` : ''}. BYAK Pro raises this to ${plans.monthly.limits[key]} per day.` : `Daily limit reached for ${what}. It resets at midnight UTC.`, 'plan_limit');
   }
   store.audit(userId, dailyActions[key], { count: amount });
 }
 /** Entitlement plus today's usage of the daily allowances, for the app's counters and paywalls. */
-const planView = userId => ({ ...billing.entitlement(userId), usageToday: { webSearches: dailyUsed(userId, 'webSearchesPerDay'), images: dailyUsed(userId, 'imagesPerDay') }, highlights: proHighlights });
+const planView = userId => ({ ...billing.entitlement(userId), usageToday: { webSearches: dailyUsed(userId, 'webSearchesPerDay'), images: dailyUsed(userId, 'imagesPerDay'), comparisons: dailyUsed(userId, 'comparisonsPerDay') }, highlights: proHighlights });
 
 // ---------- views ----------
 const publicUser = user => ({ id: user.id, email: user.email, name: user.name, role: user.role, createdAt: user.createdAt, hasPassword: Boolean(user.passwordHash), googleLinked: Boolean(user.googleSub) });
@@ -224,7 +225,7 @@ const handler = async (req, res) => {
     if (path !== '/health') rateLimit(`${clientIp(req)}:${isAuth ? 'auth' : 'api'}`, isAuth ? config.authRateLimit : config.apiRateLimit);
 
     if (method === 'GET' && path === '/health') return send(res, 200, { status: 'ok', service: 'byak-api', version: VERSION, time: now() });
-    if (method === 'GET' && path === '/v1/config') return send(res, 200, { name: 'BYAK AI', version: VERSION, tagline: 'Bring Your API Key. Bring Your Intelligence.', plans: Object.values(plans).map(({ entitlements, ...p }) => ({ ...p, entitlements, productId: p.id === 'free' ? null : billing.productIds()[p.id] })), proHighlights, billing: { googlePlay: billing.configured() }, googleSignIn: config.googleClientIds.length > 0, webSearch: Boolean(config.braveKey), vision: true, localAi: { status: config.allowLocalProviders ? 'available' : 'coming_soon' } });
+    if (method === 'GET' && path === '/v1/config') return send(res, 200, { name: 'BYAK AI', version: VERSION, tagline: 'Bring Your API Key. Bring Your Intelligence.', plans: Object.values(plans).map(({ entitlements, ...p }) => ({ ...p, entitlements, productId: p.id === 'free' ? null : billing.productIds().productId, basePlanId: p.id === 'free' ? null : billing.productIds()[p.id] })), proHighlights, billing: { googlePlay: billing.configured() }, googleSignIn: config.googleClientIds.length > 0, webSearch: Boolean(config.braveKey), vision: true, localAi: { status: config.allowLocalProviders ? 'available' : 'coming_soon' } });
     if (method === 'GET' && path === '/v1/models/catalog') return send(res, 200, { providers: Object.entries(providerCatalog).map(([id, value]) => ({ id, name: value.name, kind: value.kind, models: value.models, localOnly: Boolean(value.localOnly), keyOptional: Boolean(value.keyOptional) })) });
 
     // Google Play Real-time developer notifications (Pub/Sub push); authenticated by a shared secret in the URL.
@@ -443,6 +444,28 @@ const handler = async (req, res) => {
       store.audit(me.sub, 'research.search', { source }); return send(res, 200, { query, source, items });
     }
     if (method === 'POST' && path === '/v1/tools/url-reader') { const body = await jsonBody(req); return send(res, 200, await readUrl(requireText(body.url, 'url', 2000))); }
+
+    if (method === 'POST' && path === '/v1/compare') {
+      // Sends one question to two models at once so answers can be compared side by side.
+      const body = await jsonBody(req); const content = requireText(body.content, 'content', 20000);
+      if (!Array.isArray(body.targets) || body.targets.length !== 2) throw httpError(400, 'Choose exactly two models to compare');
+      const targets = body.targets.map(t => {
+        const connection = owner('providers', String(t?.providerId || ''), me.sub);
+        if (!connection || connection.enabled === false) throw httpError(400, 'Provider not found');
+        return { connection, model: requireText(t.model || connection.defaultModel, 'model', 200) };
+      });
+      consumeDaily(me.sub, 'comparisonsPerDay');
+      const { system, citations } = buildContext(me.sub, { projectId: body.projectId && owner('projects', body.projectId, me.sub) ? body.projectId : null }, content);
+      const results = await Promise.all(targets.map(async ({ connection, model }) => {
+        const started = Date.now();
+        try {
+          const result = await streamChat(connection, { model, temperature: temperatureOf(body.temperature), messages: [{ role: 'system', content: system }, { role: 'user', content }] });
+          store.insert('usage', { userId: me.sub, conversationId: null, providerId: connection.id, provider: connection.provider, model, inputTokens: result.usage.inputTokens, outputTokens: result.usage.outputTokens });
+          return { providerId: connection.id, providerName: connection.name, model, content: result.text, usage: result.usage, ms: Date.now() - started, error: null };
+        } catch (error) { return { providerId: connection.id, providerName: connection.name, model, content: '', usage: null, ms: Date.now() - started, error: error.message }; }
+      }));
+      return send(res, 200, { content, citations, results });
+    }
 
     if (method === 'GET' && path === '/v1/prompts') return send(res, 200, { items: store.filter('prompts', x => x.userId === me.sub).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)), templates: builtInPrompts });
     if (method === 'POST' && path === '/v1/prompts') {
