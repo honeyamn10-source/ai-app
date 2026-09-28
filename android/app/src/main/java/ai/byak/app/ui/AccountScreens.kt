@@ -31,7 +31,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-private val playProducts get() = listOf(BuildConfig.PLAY_MONTHLY_PRODUCT_ID, BuildConfig.PLAY_ANNUAL_PRODUCT_ID)
+private val playProduct get() = BuildConfig.PLAY_SUBSCRIPTION_PRODUCT_ID
+private val playBasePlans get() = listOf(BuildConfig.PLAY_MONTHLY_BASE_PLAN_ID, BuildConfig.PLAY_ANNUAL_BASE_PLAN_ID)
 
 // ---------- Settings ----------
 @Composable fun SettingsScreen(session: Session, state: UiState, vm: ByakViewModel, navigate: (Destination) -> Unit) {
@@ -90,7 +91,7 @@ private val playProducts get() = listOf(BuildConfig.PLAY_MONTHLY_PRODUCT_ID, Bui
 // ---------- Plan / payments ----------
 @Composable fun PlanScreen(state: UiState, vm: ByakViewModel) {
     val context = LocalContext.current; val sub = state.subscription
-    LaunchedEffect(Unit) { vm.loadPlans(playProducts) }
+    LaunchedEffect(Unit) { vm.loadPlans(playProduct, playBasePlans) }
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(20.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
         item {
             Card(colors = CardDefaults.cardColors(containerColor = if (sub.isPro) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant), shape = RoundedCornerShape(24.dp)) {
@@ -107,8 +108,8 @@ private val playProducts get() = listOf(BuildConfig.PLAY_MONTHLY_PRODUCT_ID, Bui
             if (state.offers.isEmpty()) item {
                 Text(if (state.busy) "Loading prices from Google Play…" else "Plans are unavailable right now. Make sure this app was installed from Google Play and you're signed in to the Play Store.", color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
-            items(state.offers, key = { it.productId }) { offer ->
-                val annual = offer.productId == BuildConfig.PLAY_ANNUAL_PRODUCT_ID
+            items(state.offers, key = { it.basePlanId }) { offer ->
+                val annual = offer.basePlanId == BuildConfig.PLAY_ANNUAL_BASE_PLAN_ID
                 Card(onClick = { context.findActivity()?.let { vm.buy(it, offer) } }, shape = RoundedCornerShape(20.dp), colors = CardDefaults.cardColors(containerColor = if (annual) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant)) {
                     Row(Modifier.padding(18.dp).fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                         Column(Modifier.weight(1f)) {
