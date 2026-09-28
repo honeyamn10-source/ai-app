@@ -30,6 +30,8 @@
 
 **Bring Your API Key. Bring Your Intelligence.**
 
+> **No server needed.** The Android app runs entirely on the phone by default: it calls OpenAI, Anthropic, Gemini and other providers directly with the user's own key (encrypted with the Android Keystore) and keeps all data on the device. The Node API in `backend/` is optional, for teams that want accounts and data on their own server.
+
 BYAK AI is a development foundation for a multi-provider Android AI assistant. This repository contains a runnable zero-dependency reference API, a PostgreSQL/pgvector production schema, and a native Kotlin/Jetpack Compose client.
 
 This guide describes the default `main` branch. Versioned release work may live on other branches; confirm the branch and its checks before building a store release.
@@ -96,6 +98,10 @@ npm test
 ```
 
 The reference API uses an encrypted-permissions local JSON store so it runs immediately. Production deployment should replace `Store` with the PostgreSQL repository described in `backend/migrations/001_initial.sql`.
+
+## Google Sign-In setup
+
+The app ships with web client ID `1077439001893-…apps.googleusercontent.com` (override with `-PBYAK_GOOGLE_WEB_CLIENT_ID=…`). For the account picker to work on a Play-installed build, the same Google Cloud project also needs an **Android** OAuth client for package `ai.byak.app` with the **SHA-1 of the Play App Signing key** (Play Console → Test and release → App integrity → App signing). Add the upload key's SHA-1 too if you install builds outside Play.
 
 ## Run Android
 

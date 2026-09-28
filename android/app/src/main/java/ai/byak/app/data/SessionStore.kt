@@ -45,6 +45,12 @@ class SessionStore(private val context: Context, private val vault: CredentialVa
 
     suspend fun clear() { context.dataStore.edit { it.clear() } }
 
+    companion object {
+        /** Marker stored instead of server tokens when BYAK runs entirely on the phone. */
+        const val ON_DEVICE = "on-device"
+        fun isOnDevice(session: Session) = session.accessToken == ON_DEVICE
+    }
+
     // A key invalidated by the OS (e.g. after a device restore) just signs the user out.
     private fun open(value: String): String? = runCatching { vault.decrypt(value) }.getOrNull()
 }

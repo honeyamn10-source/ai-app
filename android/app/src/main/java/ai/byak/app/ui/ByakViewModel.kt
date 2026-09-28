@@ -5,6 +5,7 @@ import ai.byak.app.billing.BillingManager
 import ai.byak.app.billing.PlanOffer
 import ai.byak.app.billing.PurchaseOutcome
 import ai.byak.app.data.*
+import ai.byak.app.data.local.LocalApi
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.CancellationException
@@ -31,7 +32,10 @@ data class UiState(
     val comparing: Boolean = false, val comparison: List<ComparisonResult> = emptyList(), val comparisonQuestion: String = ""
 )
 
-class ByakViewModel(private val api: ApiClient, private val billing: BillingManager) : ViewModel() {
+class ByakViewModel(private val api: ByakApi, private val billing: BillingManager) : ViewModel() {
+    /** True when BYAK runs entirely on this phone (no server). */
+    val isLocal: Boolean get() = api.isLocal
+    private var pendingBasePlan: String? = null
     private val _state = MutableStateFlow(UiState())
     val state: StateFlow<UiState> = _state.asStateFlow()
     private var generation: Job? = null
@@ -41,7 +45,7 @@ class ByakViewModel(private val api: ApiClient, private val billing: BillingMana
         viewModelScope.launch {
             billing.purchases.collect { outcome ->
                 when (outcome) {
-                    is PurchaseOutcome.Purchased -> task("Activating your plan…") { val sub = api.verifyPurchases(outcome.tokens); update { copy(subscription = sub, upgradeSuggested = false) }; notice(if (sub.isPro) "Welcome to BYAK Pro!" else "Purchase received — activation is pending") }
+                    is PurchaseOutcome.Purchased -> task("Activating your plan…") { pendingBasePlan?.let { api.rememberPlanChoice(it) }; val sub = api.verifyPurchases(outcome.tokens); update { copy(subscription = sub, upgradeSuggested = false) }; notice(if (sub.isPro) "Welcome to BYAK Pro!" else "Purchase received — activation is pending") }
                     PurchaseOutcome.Pending -> notice("Payment pending. Your plan activates once Google Play confirms it.")
                     PurchaseOutcome.Cancelled -> Unit
                     is PurchaseOutcome.Failed -> update { copy(error = outcome.message) }
@@ -230,6 +234,10 @@ class ByakViewModel(private val api: ApiClient, private val billing: BillingMana
     fun removeFile(id: String) = task("File deleted") { api.deleteFile(id); val list = api.files(); update { copy(files = list) } }
     fun reportError(message: String) = update { copy(error = message) }
 
+    // ---------- on-device extras ----------
+    suspend fun hasWebSearchKey(): Boolean = (api as? LocalApi)?.hasBraveKey() ?: false
+    fun setWebSearchKey(key: String) = task(if (key.isBlank()) "Web search key removed" else "Web search key saved") { (api as? LocalApi)?.setBraveKey(key) }
+
     // ---------- compare ----------
     fun compare(question: String, first: Pair<String, String>, second: Pair<String, String>) = viewModelScope.launch {
         update { copy(comparing = true, comparison = emptyList(), comparisonQuestion = question, error = null) }
@@ -274,6 +282,7 @@ class ByakViewModel(private val api: ApiClient, private val billing: BillingMana
     fun buy(activity: Activity, offer: PlanOffer) = viewModelScope.launch {
         val sub = state.value.subscription
         val replacing = if (sub.isPro && sub.basePlanId != offer.basePlanId) runCatching { billing.ownedPurchaseTokens().firstOrNull() }.getOrNull() else null
+        pendingBasePlan = offer.basePlanId
         billing.launch(activity, offer, sub.billingAccountId, replacing)?.let { message -> update { copy(error = message) } }
     }
     fun restorePurchases() = task {

@@ -2,6 +2,7 @@ package ai.byak.app.billing
 
 import android.app.Activity
 import android.content.Context
+import com.android.billingclient.api.AcknowledgePurchaseParams
 import com.android.billingclient.api.BillingClient
 import com.android.billingclient.api.BillingClientStateListener
 import com.android.billingclient.api.BillingFlowParams
@@ -12,6 +13,7 @@ import com.android.billingclient.api.Purchase
 import com.android.billingclient.api.PurchasesUpdatedListener
 import com.android.billingclient.api.QueryProductDetailsParams
 import com.android.billingclient.api.QueryPurchasesParams
+import com.android.billingclient.api.acknowledgePurchase
 import com.android.billingclient.api.queryProductDetails
 import com.android.billingclient.api.queryPurchasesAsync
 import kotlinx.coroutines.CompletableDeferred
@@ -114,6 +116,19 @@ class BillingManager(context: Context) : PurchasesUpdatedListener {
         )
         val result = client.launchBillingFlow(activity, builder.build())
         return if (result.responseCode == BillingClient.BillingResponseCode.OK) null else result.debugMessage.ifBlank { "Google Play couldn't start the purchase (${result.responseCode})" }
+    }
+
+    /** Subscriptions this Play account currently owns (active, in grace, or cancelled but not yet expired). */
+    suspend fun activePurchases(): List<Purchase> {
+        if (!ready()) return emptyList()
+        return client.queryPurchasesAsync(QueryPurchasesParams.newBuilder().setProductType(BillingClient.ProductType.SUBS).build())
+            .purchasesList.filter { it.purchaseState == Purchase.PurchaseState.PURCHASED }
+    }
+
+    /** Acknowledges on the device (on-device mode has no server to do it); unacknowledged purchases are refunded after 3 days. */
+    suspend fun acknowledge(purchaseToken: String) {
+        if (!ready()) return
+        client.acknowledgePurchase(AcknowledgePurchaseParams.newBuilder().setPurchaseToken(purchaseToken).build())
     }
 
     /** Tokens of subscriptions this Play account currently owns, used for "Restore purchases". */

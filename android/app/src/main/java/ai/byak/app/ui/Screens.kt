@@ -86,7 +86,7 @@ import kotlinx.coroutines.withContext
         if (state.research.isNotEmpty()) OutlinedButton(onClick = { vm.summarizeResearch(query.trim()); openChat() }, enabled = state.providers.any { it.enabled }, modifier = Modifier.padding(top = 10.dp)) { Icon(Icons.Outlined.AutoAwesome, null); Spacer(Modifier.width(8.dp)); Text("Summarize these results with AI") }
         Spacer(Modifier.height(12.dp))
         LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            if (state.research.isEmpty()) item { EmptyState(Icons.Outlined.TravelExplore, "Source-first research", "Search GitHub and Reddit now. Web search needs the server's search connector.") }
+            if (state.research.isEmpty()) item { EmptyState(Icons.Outlined.TravelExplore, "Source-first research", "Search GitHub, Reddit or the web. Every result keeps its link.") }
             items(state.research) { result ->
                 Card(Modifier.fillMaxWidth().clickable { runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(result.url))) } }) {
                     ListItem(headlineContent = { Text(result.title, fontWeight = FontWeight.Bold) }, supportingContent = { Column { Text(Uri.parse(result.url).host.orEmpty(), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary); Text(result.summary, maxLines = 4, overflow = TextOverflow.Ellipsis) } }, trailingContent = { Icon(Icons.AutoMirrored.Outlined.OpenInNew, "Open source") })
@@ -205,7 +205,7 @@ fun formatBytes(bytes: Long): String = when { bytes < 1024 -> "$bytes B"; bytes 
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(20.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         item {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Column(Modifier.weight(1f)) { Text("AI providers", fontSize = 25.sp, fontWeight = FontWeight.Black); Text("Keys are encrypted on the server and always masked", color = MaterialTheme.colorScheme.onSurfaceVariant) }
+                Column(Modifier.weight(1f)) { Text("AI providers", fontSize = 25.sp, fontWeight = FontWeight.Black); Text("Keys are encrypted and always masked", color = MaterialTheme.colorScheme.onSurfaceVariant) }
                 Button(onClick = { adding = true }) { Icon(Icons.Outlined.Add, null); Text(" Connect") }
             }
         }
