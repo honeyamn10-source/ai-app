@@ -190,10 +190,22 @@ private fun ProCard(state: SettingsUiState, activity: Activity?, viewModel: Sett
                 )
             }
 
+            val requiresCloudAccount = state.session?.localOnly != false
+            if (requiresCloudAccount && plans.isNotEmpty()) {
+                Text(
+                    "Sign in before subscribing so Google Play can securely verify and restore Pro on your account.",
+                    color = PremiumGold,
+                    fontSize = 12.sp,
+                )
+            }
             plans.forEach { plan ->
-                val available = state.billing.offers.any { it.productId == plan.productId }
-                PlanRow(plan, available, state.billing.active) {
-                    activity?.let { viewModel.purchase(it, plan.productId) }
+                val available = state.billing.offers.any { it.planId == plan.planId }
+                PlanRow(plan, available, state.billing.active, requiresCloudAccount) {
+                    if (requiresCloudAccount) {
+                        viewModel.signOut()
+                    } else {
+                        activity?.let { viewModel.purchase(it, plan.planId) }
+                    }
                 }
             }
 
@@ -220,7 +232,13 @@ private fun ProCard(state: SettingsUiState, activity: Activity?, viewModel: Sett
 }
 
 @Composable
-private fun PlanRow(plan: PlanOffer, available: Boolean, active: Boolean, purchase: () -> Unit) {
+private fun PlanRow(
+    plan: PlanOffer,
+    available: Boolean,
+    active: Boolean,
+    requiresCloudAccount: Boolean,
+    purchase: () -> Unit,
+) {
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
         Column(Modifier.weight(1f)) {
             Text(plan.title.removePrefix("BYAK Pro "), fontWeight = FontWeight.Bold)
@@ -233,6 +251,7 @@ private fun PlanRow(plan: PlanOffer, available: Boolean, active: Boolean, purcha
         ) {
             Text(when {
                 active -> "Active"
+                requiresCloudAccount -> "Sign in"
                 available -> "Choose"
                 else -> "Play only"
             })

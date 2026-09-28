@@ -4,8 +4,33 @@ import androidx.compose.runtime.Immutable
 
 enum class PlayCatalogStatus { CONNECTING, READY, NOT_PUBLISHED, UNAVAILABLE, ERROR }
 
+internal object BillingCatalog {
+    const val PRODUCT_ID = "byak_pro"
+    const val MONTHLY_BASE_PLAN_ID = "monthly"
+    const val YEARLY_BASE_PLAN_ID = "yearly"
+    val basePlanOrder = listOf(MONTHLY_BASE_PLAN_ID, YEARLY_BASE_PLAN_ID)
+
+    fun title(basePlanId: String): String = when (basePlanId) {
+        MONTHLY_BASE_PLAN_ID -> "BYAK Pro Monthly"
+        YEARLY_BASE_PLAN_ID -> "BYAK Pro Yearly"
+        else -> "BYAK Pro"
+    }
+
+    fun period(basePlanId: String): String = when (basePlanId) {
+        MONTHLY_BASE_PLAN_ID -> "per month"
+        YEARLY_BASE_PLAN_ID -> "per year"
+        else -> ""
+    }
+}
+
 @Immutable
-data class PlanOffer(val productId: String, val title: String, val price: String, val period: String)
+data class PlanOffer(
+    val planId: String,
+    val productId: String,
+    val title: String,
+    val price: String,
+    val period: String,
+)
 
 @Immutable
 data class BillingState(

@@ -174,7 +174,8 @@ const handler = async (req, res) => {
       if (existing && existing.userId !== me.sub) throw Object.assign(new Error('Purchase is already linked to another account'), { status: 409 });
       const values = {
         userId: me.sub,
-        plan: productId === 'byak_annual_10' ? 'annual' : 'monthly',
+        plan: verified.basePlanId === 'yearly' ? 'annual' : 'monthly',
+        basePlanId: verified.basePlanId,
         productId,
         purchaseTokenHash: verified.purchaseTokenHash,
         status: verified.active ? 'active' : 'inactive',
@@ -189,6 +190,7 @@ const handler = async (req, res) => {
         verified: verified.verified,
         active: verified.active,
         productId,
+        basePlanId: verified.basePlanId,
         expiresAtEpochMillis: verified.expiresAtEpochMillis,
       });
     }

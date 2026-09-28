@@ -72,6 +72,8 @@ export async function verifyGoogleSubscription({ productId, purchaseToken }) {
     verified: true,
     active,
     productId,
+    basePlanId: line.offerDetails?.basePlanId || null,
+    offerId: line.offerDetails?.offerId || null,
     purchaseTokenHash: hashPurchaseToken(purchaseToken),
     expiresAtEpochMillis: Number.isFinite(expiresAtEpochMillis) ? expiresAtEpochMillis : null,
     subscriptionState: purchase.subscriptionState,

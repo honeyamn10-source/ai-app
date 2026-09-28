@@ -31,9 +31,14 @@ class BillingManager @Inject constructor(
     private val verifier: BillingVerificationRepository,
     @ApplicationScope private val scope: CoroutineScope,
 ) : PurchasesUpdatedListener {
+    private data class PurchasableOffer(
+        val product: ProductDetails,
+        val offerToken: String,
+    )
+
     private val mutableState = MutableStateFlow(BillingState())
     val state: StateFlow<BillingState> = mutableState.asStateFlow()
-    private val details = mutableMapOf<String, ProductDetails>()
+    private val purchasableOffers = mutableMapOf<String, PurchasableOffer>()
     private val client = BillingClient.newBuilder(context)
         .setListener(this)
         .enablePendingPurchases(PendingPurchasesParams.newBuilder().enableOneTimeProducts().build())
@@ -66,7 +71,7 @@ class BillingManager @Inject constructor(
                             )
                         }
                         queryProducts()
-                        restorePurchases()
+                        restorePurchases(showEmptyMessage = false)
                         queryBillingChoiceInfo()
                     }
                     BillingClient.BillingResponseCode.BILLING_UNAVAILABLE -> mutableState.value = BillingState(
@@ -96,39 +101,56 @@ class BillingManager @Inject constructor(
     }
 
     private fun queryProducts() {
-        val products = PRODUCT_IDS.map { id ->
-            QueryProductDetailsParams.Product.newBuilder()
-                .setProductId(id)
-                .setProductType(BillingClient.ProductType.SUBS)
-                .build()
-        }
+        val product = QueryProductDetailsParams.Product.newBuilder()
+            .setProductId(BillingCatalog.PRODUCT_ID)
+            .setProductType(BillingClient.ProductType.SUBS)
+            .build()
         client.queryProductDetailsAsync(
-            QueryProductDetailsParams.newBuilder().setProductList(products).build(),
+            QueryProductDetailsParams.newBuilder().setProductList(listOf(product)).build(),
         ) { result, queryResult ->
             if (result.responseCode != BillingClient.BillingResponseCode.OK) {
                 handleBillingError(result)
                 return@queryProductDetailsAsync
             }
-            details.clear()
-            queryResult.productDetailsList.forEach { details[it.productId] = it }
-            val offers = queryResult.productDetailsList.mapNotNull { product ->
-                val phase = product.subscriptionOfferDetails?.firstOrNull()
-                    ?.pricingPhases?.pricingPhaseList?.firstOrNull() ?: return@mapNotNull null
-                PlanOffer(
-                    productId = product.productId,
-                    title = if (product.productId == MONTHLY) "BYAK Pro Monthly" else "BYAK Pro Annual",
-                    price = phase.formattedPrice,
-                    period = if (product.productId == MONTHLY) "per month" else "per year",
-                )
-            }.sortedBy { it.productId != MONTHLY }
+
+            purchasableOffers.clear()
+            val productDetails = queryResult.productDetailsList
+                .firstOrNull { it.productId == BillingCatalog.PRODUCT_ID }
+            val subscriptionOffers = productDetails?.subscriptionOfferDetails.orEmpty()
+            val offers = if (productDetails == null) {
+                emptyList()
+            } else {
+                BillingCatalog.basePlanOrder.mapNotNull { basePlanId ->
+                    val matching = subscriptionOffers.filter { it.basePlanId == basePlanId }
+                    val selected = matching.firstOrNull { it.offerId == null }
+                        ?: matching.firstOrNull()
+                        ?: return@mapNotNull null
+                    val phase = selected.pricingPhases.pricingPhaseList.lastOrNull()
+                        ?: return@mapNotNull null
+                    purchasableOffers[basePlanId] = PurchasableOffer(
+                        product = productDetails,
+                        offerToken = selected.offerToken,
+                    )
+                    PlanOffer(
+                        planId = basePlanId,
+                        productId = productDetails.productId,
+                        title = BillingCatalog.title(basePlanId),
+                        price = phase.formattedPrice,
+                        period = BillingCatalog.period(basePlanId),
+                    )
+                }
+            }
             val published = offers.isNotEmpty()
             mutableState.update {
                 it.copy(
                     loading = false,
                     offers = offers,
                     catalogStatus = if (published) PlayCatalogStatus.READY else PlayCatalogStatus.NOT_PUBLISHED,
-                    message = if (published) null else
-                        "Plans are not published for this installation. Install BYAK from its Google Play internal-test or production listing to enable checkout.",
+                    message = if (published) {
+                        null
+                    } else {
+                        "BYAK Pro is not available for this Play account yet. Install BYAK from the closed-test Play link and confirm the byak_pro monthly/yearly base plans are active."
+                    },
                 )
             }
         }
@@ -143,29 +165,33 @@ class BillingManager @Inject constructor(
                 mutableState.update {
                     it.copy(
                         billingChoiceImageUrl = info.playBillingChoiceImageUrl,
-                        billingChoiceLoyaltyInfo = info.playBillingLoyaltyInfo,
                     )
                 }
             }
         }
     }
 
-    private fun restorePurchases() {
+    private fun restorePurchases(showEmptyMessage: Boolean) {
         if (!client.isReady) return
         client.queryPurchasesAsync(
             QueryPurchasesParams.newBuilder().setProductType(BillingClient.ProductType.SUBS).build(),
         ) { result, purchases ->
             if (result.responseCode == BillingClient.BillingResponseCode.OK) {
-                if (purchases.isEmpty()) {
+                val byakPurchases = purchases.filter { BillingCatalog.PRODUCT_ID in it.products }
+                if (byakPurchases.isEmpty()) {
                     mutableState.update {
                         it.copy(
                             loading = false,
                             verifying = false,
-                            message = "No active BYAK Pro purchase was found for this Google Play account.",
+                            message = if (showEmptyMessage) {
+                                "No active BYAK Pro purchase was found for this Google Play account."
+                            } else {
+                                it.message
+                            },
                         )
                     }
                 } else {
-                    processPurchases(purchases)
+                    processPurchases(byakPurchases, showEmptyMessage)
                 }
             } else {
                 handleBillingError(result)
@@ -173,27 +199,28 @@ class BillingManager @Inject constructor(
         }
     }
 
-    fun purchase(activity: Activity, productId: String) {
-        val product = details[productId]
-        if (product == null) {
+    fun purchase(activity: Activity, planId: String) {
+        if (!client.isReady) {
+            mutableState.update { it.copy(message = "Google Play is still connecting. Try again in a moment.") }
+            return
+        }
+        val selected = purchasableOffers[planId]
+        if (selected == null) {
             mutableState.update {
-                it.copy(message = "This plan is not available for this Play Store installation. Use the internal-test Play link, then try again.")
+                it.copy(message = "This plan is not available for this Play Store account or testing track.")
             }
             return
         }
-        val offerToken = product.subscriptionOfferDetails?.firstOrNull()?.offerToken
-        if (offerToken.isNullOrBlank()) {
-            mutableState.update { it.copy(message = "No eligible base plan is configured for this Google Play account.") }
-            return
-        }
         val productParams = BillingFlowParams.ProductDetailsParams.newBuilder()
-            .setProductDetails(product)
-            .setOfferToken(offerToken)
+            .setProductDetails(selected.product)
+            .setOfferToken(selected.offerToken)
             .build()
         handleBillingError(
             client.launchBillingFlow(
                 activity,
-                BillingFlowParams.newBuilder().setProductDetailsParamsList(listOf(productParams)).build(),
+                BillingFlowParams.newBuilder()
+                    .setProductDetailsParamsList(listOf(productParams))
+                    .build(),
             ),
             ignoreSuccess = true,
         )
@@ -205,39 +232,42 @@ class BillingManager @Inject constructor(
             return
         }
         mutableState.update { it.copy(message = "Checking your Google Play purchases…") }
-        restorePurchases()
+        restorePurchases(showEmptyMessage = true)
     }
 
     override fun onPurchasesUpdated(result: BillingResult, purchases: MutableList<Purchase>?) {
         when (result.responseCode) {
-            BillingClient.BillingResponseCode.OK -> processPurchases(purchases.orEmpty())
-            BillingClient.BillingResponseCode.USER_CANCELED -> mutableState.update { it.copy(message = "Purchase cancelled.") }
+            BillingClient.BillingResponseCode.OK ->
+                processPurchases(purchases.orEmpty(), showEmptyMessage = true)
+            BillingClient.BillingResponseCode.USER_CANCELED ->
+                mutableState.update { it.copy(message = "Purchase cancelled.") }
             else -> handleBillingError(result)
         }
     }
 
-    private fun processPurchases(purchases: List<Purchase>) {
-        val purchased = purchases.filter { it.purchaseState == Purchase.PurchaseState.PURCHASED }
+    private fun processPurchases(purchases: List<Purchase>, showEmptyMessage: Boolean) {
+        val matching = purchases.filter { BillingCatalog.PRODUCT_ID in it.products }
+        val purchased = matching.filter { it.purchaseState == Purchase.PurchaseState.PURCHASED }
         if (purchased.isEmpty()) {
-            val pending = purchases.any { it.purchaseState == Purchase.PurchaseState.PENDING }
+            val pending = matching.any { it.purchaseState == Purchase.PurchaseState.PENDING }
             mutableState.update {
                 it.copy(
                     loading = false,
                     verifying = false,
-                    message = if (pending) {
-                        "Your Google Play purchase is pending. Pro will activate after payment completes."
-                    } else {
-                        "No active BYAK Pro purchase was found for this Google Play account."
+                    message = when {
+                        pending -> "Your Google Play purchase is pending. Pro will activate after payment completes."
+                        showEmptyMessage -> "No active BYAK Pro purchase was found for this Google Play account."
+                        else -> it.message
                     },
                 )
             }
             return
         }
+
         mutableState.update { it.copy(verifying = true, message = "Confirming the purchase securely…") }
         purchased.forEach { purchase ->
-            val productId = purchase.products.firstOrNull { it in PRODUCT_IDS } ?: return@forEach
             scope.launch {
-                verifier.verify(productId, purchase.purchaseToken)
+                verifier.verify(BillingCatalog.PRODUCT_ID, purchase.purchaseToken)
                     .onSuccess {
                         if (!purchase.isAcknowledged) acknowledge(purchase)
                         mutableState.update { state ->
@@ -248,8 +278,8 @@ class BillingManager @Inject constructor(
                         mutableState.update { state ->
                             state.copy(
                                 verifying = false,
-                                active = false,
-                                message = error.message ?: "The server could not verify this purchase.",
+                                message = error.message
+                                    ?: "The BYAK server could not verify this purchase. Your Play purchase remains safe; try Restore purchases again.",
                             )
                         }
                     }
@@ -260,7 +290,11 @@ class BillingManager @Inject constructor(
     private fun acknowledge(purchase: Purchase) {
         client.acknowledgePurchase(
             AcknowledgePurchaseParams.newBuilder().setPurchaseToken(purchase.purchaseToken).build(),
-        ) { result -> if (result.responseCode != BillingClient.BillingResponseCode.OK) handleBillingError(result) }
+        ) { result ->
+            if (result.responseCode != BillingClient.BillingResponseCode.OK) {
+                handleBillingError(result)
+            }
+        }
     }
 
     private fun handleBillingError(result: BillingResult, ignoreSuccess: Boolean = false) {
@@ -288,11 +322,5 @@ class BillingManager @Inject constructor(
                 message = message,
             )
         }
-    }
-
-    companion object {
-        const val MONTHLY = "byak_monthly_1"
-        const val ANNUAL = "byak_annual_10"
-        private val PRODUCT_IDS = setOf(MONTHLY, ANNUAL)
     }
 }
