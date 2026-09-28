@@ -272,3 +272,38 @@ test('prompt library CRUD with built-in templates', async () => {
   assert.equal((await json(`/v1/prompts/${created.id}`, { method: 'DELETE', token })).status, 200);
   assert.equal((await json('/v1/prompts', { token }).then(r => r.json())).items.length, 0);
 });
+
+test('free plan: daily web search and image allowances, then a clear upgrade prompt', async () => {
+  fake.on('https://api.search.brave.com/', () => Response.json({ web: { results: [] } }));
+  fake.on('https://api.openai.com/v1/chat/completions', openaiOk('ok'));
+  const { token, conversation } = await chatWith('openai', 'sk-test-1234567890');
+  const ask = body => json(`/v1/conversations/${conversation.id}/messages`, { method: 'POST', token, body });
+  for (let i = 0; i < 3; i++) assert.equal((await ask({ content: `search ${i}`, webSearch: true })).status, 201);
+  const blocked = await ask({ content: 'one more', webSearch: true });
+  assert.equal(blocked.status, 402);
+  const error = (await blocked.json()).error;
+  assert.equal(error.code, 'plan_limit'); assert.match(error.message, /free web searches.*BYAK Pro raises this to 200/);
+  assert.equal((await ask({ content: 'no web is still fine' })).status, 201);
+
+  const image = { type: 'image', mimeType: 'image/png', data: PNG };
+  assert.equal((await ask({ content: 'pics', attachments: [image, image, image, image] })).status, 201);
+  const tooMany = await ask({ content: 'pics', attachments: [image, image] });
+  assert.equal(tooMany.status, 402); assert.match((await tooMany.json()).error.message, /1 left, this needs 2/);
+
+  const plan = await json('/v1/subscription', { token }).then(r => r.json());
+  assert.deepEqual(plan.usageToday, { webSearches: 3, images: 4 });
+  assert.equal(plan.limits.webSearchesPerDay, 3); assert.ok(plan.highlights.some(h => h.key === 'webSearchesPerDay'));
+});
+
+test('free plan keeps a shorter conversation memory and fewer saved prompts', async () => {
+  fake.on('https://api.openai.com/v1/chat/completions', openaiOk('ok'));
+  const { token, conversation } = await chatWith('openai', 'sk-test-1234567890');
+  for (let i = 0; i < 12; i++) await json(`/v1/conversations/${conversation.id}/messages`, { method: 'POST', token, body: { content: `message ${i}` } });
+  const sent = fake.calls.at(-1).body.messages;
+  assert.equal(sent.length, 1 + 20); // system prompt + last 20 messages on Free
+  assert.equal(sent.at(-1).content, 'message 11');
+
+  for (let i = 0; i < 5; i++) assert.equal((await json('/v1/prompts', { method: 'POST', token, body: { title: `p${i}`, content: 'x' } })).status, 201);
+  const sixth = await json('/v1/prompts', { method: 'POST', token, body: { title: 'p6', content: 'x' } });
+  assert.equal(sixth.status, 402); assert.match((await sixth.json()).error.message, /5 saved prompts/);
+});

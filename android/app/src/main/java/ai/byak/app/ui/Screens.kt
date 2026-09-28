@@ -60,7 +60,7 @@ import kotlinx.coroutines.withContext
         }
         if (!state.subscription.isPro) item {
             Card(onClick = { navigate(Destination.Plan) }, colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer)) {
-                Row(Modifier.padding(18.dp), verticalAlignment = Alignment.CenterVertically) { Icon(Icons.Outlined.WorkspacePremium, null); Spacer(Modifier.width(14.dp)); Column { Text("Upgrade to BYAK Pro", fontWeight = FontWeight.Bold); Text("More projects, files and research — from $1/month") } }
+                Row(Modifier.padding(18.dp), verticalAlignment = Alignment.CenterVertically) { Icon(Icons.Outlined.WorkspacePremium, null); Spacer(Modifier.width(14.dp)); Column { Text("Upgrade to BYAK Pro", fontWeight = FontWeight.Bold); Text("Web search in chat, photo questions and a longer memory — from $1/month") } }
             }
         }
     }

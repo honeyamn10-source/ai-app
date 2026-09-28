@@ -5,6 +5,7 @@ package ai.byak.app.ui
 import android.content.Intent
 import android.net.Uri
 import ai.byak.app.BuildConfig
+import ai.byak.app.data.ProHighlight
 import ai.byak.app.data.Session
 import ai.byak.app.data.SettingsStore
 import ai.byak.app.data.ThemeMode
@@ -123,21 +124,48 @@ private val playProducts get() = listOf(BuildConfig.PLAY_MONTHLY_PRODUCT_ID, Bui
 }
 
 // ---------- Plan / payments ----------
+/** Used until the server's list arrives (and by older servers that don't send one). */
+val defaultHighlights = listOf(
+    ProHighlight("webSearchesPerDay", "Live web search in chat", "3 per day", "200 per day"),
+    ProHighlight("imagesPerDay", "Ask about photos", "5 images per day", "500 per day"),
+    ProHighlight("historyMessages", "Conversation memory", "Last 20 messages", "Last 100 messages"),
+    ProHighlight("ragChunks", "Document search depth", "4 excerpts per answer", "10 excerpts per answer"),
+    ProHighlight("projects", "Projects", "3", "200"),
+    ProHighlight("files", "Knowledge files", "25", "2,000"),
+    ProHighlight("savedPrompts", "Saved prompts", "5", "200"),
+    ProHighlight("researchPerDay", "Research searches", "50 per day", "1,000 per day")
+)
+
 @Composable fun PlanScreen(state: UiState, vm: ByakViewModel) {
     val context = LocalContext.current; val sub = state.subscription
+    val highlights = sub.highlights.ifEmpty { defaultHighlights }
     LaunchedEffect(Unit) { vm.loadPlans(playProducts) }
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(20.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
         item {
-            Card(colors = CardDefaults.cardColors(containerColor = if (sub.isPro) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant), shape = RoundedCornerShape(24.dp)) {
+            Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer), shape = RoundedCornerShape(24.dp)) {
                 Column(Modifier.padding(20.dp).fillMaxWidth()) {
                     Icon(Icons.Outlined.WorkspacePremium, null, Modifier.size(36.dp), tint = MaterialTheme.colorScheme.primary)
-                    Text(if (sub.isPro) "You're on BYAK Pro" else "You're on the Free plan", fontSize = 22.sp, fontWeight = FontWeight.Black, modifier = Modifier.padding(top = 8.dp))
+                    Text(if (sub.isPro) "You're on BYAK Pro" else "Get more from every chat", fontSize = 22.sp, fontWeight = FontWeight.Black, modifier = Modifier.padding(top = 8.dp))
                     if (sub.isPro) Text("${sub.plan.replaceFirstChar { it.uppercase() }} · ${if (sub.autoRenewing) "renews" else "ends"} ${sub.expiresAt?.take(10) ?: ""}" + if (sub.status == "grace") " · payment issue — update your payment method in Google Play" else "")
-                    else Text("Bring your own keys free forever. Pro raises every limit.")
+                    else {
+                        Text("Pro gives your AI live web access, eyes for your photos and a longer memory.", modifier = Modifier.padding(vertical = 6.dp))
+                        highlights.take(4).forEach { perk ->
+                            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(vertical = 3.dp)) {
+                                Icon(Icons.Outlined.CheckCircle, null, Modifier.size(18.dp), tint = MaterialTheme.colorScheme.primary); Spacer(Modifier.width(8.dp))
+                                Text(perk.title, fontWeight = FontWeight.SemiBold); Text(" · ${perk.pro}")
+                            }
+                        }
+                    }
                 }
             }
         }
-        item { PlanComparison(state) }
+        if (!sub.isPro && sub.limits.isNotEmpty()) item {
+            Card { Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text("Today on the Free plan", fontWeight = FontWeight.Bold)
+                LimitBar("Web searches", sub.webSearchesToday, sub.limits["webSearchesPerDay"] ?: 0)
+                LimitBar("Photo questions", sub.imagesToday, sub.limits["imagesPerDay"] ?: 0)
+            } }
+        }
         if (!sub.isPro) {
             if (state.offers.isEmpty()) item {
                 Text(if (state.busy) "Loading prices from Google Play…" else "Plans are unavailable right now. Make sure this app was installed from Google Play and you're signed in to the Play Store.", color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -145,12 +173,19 @@ private val playProducts get() = listOf(BuildConfig.PLAY_MONTHLY_PRODUCT_ID, Bui
             items(state.offers, key = { it.productId }) { offer ->
                 val annual = offer.productId == BuildConfig.PLAY_ANNUAL_PRODUCT_ID
                 Card(onClick = { context.findActivity()?.let { vm.buy(it, offer) } }, shape = RoundedCornerShape(20.dp), colors = CardDefaults.cardColors(containerColor = if (annual) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant)) {
-                    Row(Modifier.padding(18.dp).fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                        Column(Modifier.weight(1f)) {
-                            Text(if (annual) "Annual" else "Monthly", fontWeight = FontWeight.Bold, fontSize = 18.sp)
-                            Text(if (annual) "${offer.price} per year · best value" else "${offer.price} per month")
+                    Column(Modifier.padding(18.dp).fillMaxWidth()) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Column(Modifier.weight(1f)) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Text(if (annual) "Yearly" else "Monthly", fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                                    if (annual) { Spacer(Modifier.width(8.dp)); Surface(color = MaterialTheme.colorScheme.primary, shape = RoundedCornerShape(8.dp)) { Text("BEST VALUE", Modifier.padding(horizontal = 6.dp, vertical = 2.dp), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onPrimary) } }
+                                }
+                                Text(if (offer.trial != null) "${offer.trial}, then ${offer.price} per ${if (annual) "year" else "month"}" else "${offer.price} per ${if (annual) "year" else "month"}")
+                            }
                         }
-                        Button(onClick = { context.findActivity()?.let { vm.buy(it, offer) } }) { Text("Subscribe") }
+                        Button(onClick = { context.findActivity()?.let { vm.buy(it, offer) } }, Modifier.fillMaxWidth().padding(top = 12.dp)) {
+                            Text(offer.trial?.let { "Start ${it.removeSuffix(" free trial")} free trial" } ?: "Subscribe")
+                        }
                     }
                 }
             }
@@ -158,17 +193,16 @@ private val playProducts get() = listOf(BuildConfig.PLAY_MONTHLY_PRODUCT_ID, Bui
         } else item {
             OutlinedButton(onClick = { runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://play.google.com/store/account/subscriptions?sku=${sub.productId.orEmpty()}&package=${context.packageName}"))) } }, Modifier.fillMaxWidth()) { Text("Manage subscription in Google Play") }
         }
+        item { PlanComparison(highlights) }
         item { TextButton(onClick = { vm.restorePurchases() }, Modifier.fillMaxWidth(), enabled = !state.busy) { Text("Restore purchases") } }
-        item { Text("Payment is charged to your Google Play account. Subscriptions renew automatically until cancelled in Google Play. Your provider API usage is billed separately by each provider.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+        item { Text("Payment is charged to your Google Play account. Subscriptions renew automatically until cancelled in Google Play. Free trials convert to a paid subscription unless cancelled before they end. Your provider API usage is billed separately by each provider.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
     }
 }
 
-@Composable private fun PlanComparison(state: UiState) {
-    val rows = listOf("Projects" to ("3" to "200"), "Knowledge files" to ("25" to "2,000"), "Saved memories" to ("50" to "2,000"), "Research searches / day" to ("50" to "1,000"), "Provider connections" to ("3" to "50"))
+@Composable private fun PlanComparison(highlights: List<ProHighlight>) {
     Card { Column(Modifier.padding(16.dp)) {
-        Row { Text("", Modifier.weight(1.4f)); Text("Free", Modifier.weight(1f), fontWeight = FontWeight.Bold); Text("Pro", Modifier.weight(1f), fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary) }
-        rows.forEach { (label, values) -> HorizontalDivider(Modifier.padding(vertical = 8.dp)); Row { Text(label, Modifier.weight(1.4f)); Text(values.first, Modifier.weight(1f)); Text(values.second, Modifier.weight(1f)) } }
-        state.subscription.limits.takeIf { it.isNotEmpty() }?.let { Text("Your current limits: ${it.entries.joinToString { (k, v) -> "$k $v" }}", style = MaterialTheme.typography.labelSmall, modifier = Modifier.padding(top = 10.dp)) }
+        Row { Text("Compare plans", Modifier.weight(1.4f), fontWeight = FontWeight.Bold); Text("Free", Modifier.weight(1f), fontWeight = FontWeight.Bold); Text("Pro", Modifier.weight(1f), fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary) }
+        highlights.forEach { row -> HorizontalDivider(Modifier.padding(vertical = 8.dp)); Row { Text(row.title, Modifier.weight(1.4f)); Text(row.free, Modifier.weight(1f), style = MaterialTheme.typography.bodySmall); Text(row.pro, Modifier.weight(1f), style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.SemiBold) } }
     } }
 }
 

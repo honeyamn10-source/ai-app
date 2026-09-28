@@ -8,7 +8,7 @@ import { listRemoteModels, providerCatalog, streamChat, validateProvider } from 
 import { buildRagContext, chunkText, retrieve } from './rag.mjs';
 import { builtInPrompts } from './prompts.mjs';
 import { githubSearch, readUrl, redditSearch, webSearch } from './research.mjs';
-import { createBilling, plans } from './billing.mjs';
+import { createBilling, plans, proHighlights } from './billing.mjs';
 
 const VERSION = '0.3.0';
 export const store = await new Store().init();
@@ -29,10 +29,26 @@ function rateLimit(key, limit, windowMs = 60000) {
 }
 setInterval(() => { const t = Date.now(); for (const [key, value] of attempts) if (value.reset < t) attempts.delete(key); }, 60000).unref();
 
+const limitLabels = { providers: 'provider connections', projects: 'projects', files: 'knowledge files', memories: 'saved memories', savedPrompts: 'saved prompts', researchPerDay: 'research searches per day' };
 function enforceLimit(userId, key, current) {
   const { limits, tier } = billing.entitlement(userId);
-  if (current >= limits[key]) throw httpError(402, tier === 'free' ? `The free plan includes ${limits[key]} ${key}. Upgrade to BYAK Pro for more.` : `Plan limit reached for ${key}`, 'plan_limit');
+  if (current >= limits[key]) throw httpError(402, tier === 'free' ? `The free plan includes ${limits[key]} ${limitLabels[key] || key}. Upgrade to BYAK Pro for more.` : `Plan limit reached for ${limitLabels[key] || key}`, 'plan_limit');
 }
+
+// Daily allowances (web search, images) are counted from audit events so they reset at midnight UTC.
+const dailyActions = { webSearchesPerDay: 'chat.web_search', imagesPerDay: 'chat.images' };
+const dailyUsed = (userId, key) => { const today = now().slice(0, 10); return store.filter('audit', x => x.userId === userId && x.action === dailyActions[key] && x.createdAt.startsWith(today)).reduce((sum, x) => sum + (x.metadata?.count || 1), 0); };
+function consumeDaily(userId, key, amount = 1) {
+  if (!amount) return;
+  const { limits, tier } = billing.entitlement(userId); const used = dailyUsed(userId, key); const left = Math.max(limits[key] - used, 0);
+  if (used + amount > limits[key]) {
+    const what = key === 'webSearchesPerDay' ? `web searches (${limits[key]} per day)` : `photo questions (${limits[key]} images per day)`;
+    throw httpError(402, tier === 'free' ? `You've used today's free ${what}${left ? ` — ${left} left, this needs ${amount}` : ''}. BYAK Pro raises this to ${plans.monthly.limits[key]} per day.` : `Daily limit reached for ${what}. It resets at midnight UTC.`, 'plan_limit');
+  }
+  store.audit(userId, dailyActions[key], { count: amount });
+}
+/** Entitlement plus today's usage of the daily allowances, for the app's counters and paywalls. */
+const planView = userId => ({ ...billing.entitlement(userId), usageToday: { webSearches: dailyUsed(userId, 'webSearchesPerDay'), images: dailyUsed(userId, 'imagesPerDay') }, highlights: proHighlights });
 
 // ---------- views ----------
 const publicUser = user => ({ id: user.id, email: user.email, name: user.name, role: user.role, createdAt: user.createdAt, hasPassword: Boolean(user.passwordHash), googleLinked: Boolean(user.googleSub) });
@@ -96,7 +112,8 @@ function buildContext(userId, conversation, query, web = { sources: [], notes: [
   const project = conversation.projectId ? owner('projects', conversation.projectId, userId) : null;
   const files = store.filter('files', x => x.userId === userId && (!project || x.projectId === project.id));
   const chunks = files.flatMap(file => file.chunks.map(chunk => ({ ...chunk, fileId: file.id, fileName: file.name })));
-  const matches = retrieve(query, chunks);
+  const { limits } = billing.entitlement(userId);
+  const matches = retrieve(query, chunks, limits.ragChunks);
   const memories = user.memoryEnabled ? store.filter('memories', x => x.userId === userId).slice(-50) : [];
   const system = [
     `You are BYAK AI, a helpful, accurate multi-provider assistant. Today is ${now().slice(0, 10)}. Use Markdown formatting when it helps readability.`,
@@ -127,7 +144,7 @@ async function generate({ me, conversation, connection, model, userMessage, temp
   const web = await webContext(userMessage.content, { search }, message => { if (res) sse(res, 'status', { message }); });
   const { system, citations } = buildContext(me.sub, conversation, userMessage.content, web);
   // Images are sent with the message being answered; earlier ones are summarised to keep requests small.
-  const history = conversationMessages(conversation.id).filter(x => x.status !== 'error').slice(-config.historyMessages).map(x => {
+  const history = conversationMessages(conversation.id).filter(x => x.status !== 'error').slice(-Math.min(config.historyMessages * 3, billing.entitlement(me.sub).limits.historyMessages)).map(x => {
     const images = x.attachments?.filter(a => a.type === 'image') || [];
     if (x.id === userMessage.id) return { role: x.role, content: x.content, images: images.map(({ mimeType, data }) => ({ mimeType, data })) };
     return { role: x.role, content: images.length ? `${x.content}\n[${images.length} image(s) were attached to this message]` : x.content };
@@ -207,7 +224,7 @@ const handler = async (req, res) => {
     if (path !== '/health') rateLimit(`${clientIp(req)}:${isAuth ? 'auth' : 'api'}`, isAuth ? config.authRateLimit : config.apiRateLimit);
 
     if (method === 'GET' && path === '/health') return send(res, 200, { status: 'ok', service: 'byak-api', version: VERSION, time: now() });
-    if (method === 'GET' && path === '/v1/config') return send(res, 200, { name: 'BYAK AI', version: VERSION, tagline: 'Bring Your API Key. Bring Your Intelligence.', plans: Object.values(plans).map(({ entitlements, ...p }) => ({ ...p, entitlements, productId: p.id === 'free' ? null : billing.productIds()[p.id] })), billing: { googlePlay: billing.configured() }, googleSignIn: config.googleClientIds.length > 0, webSearch: Boolean(config.braveKey), vision: true, localAi: { status: config.allowLocalProviders ? 'available' : 'coming_soon' } });
+    if (method === 'GET' && path === '/v1/config') return send(res, 200, { name: 'BYAK AI', version: VERSION, tagline: 'Bring Your API Key. Bring Your Intelligence.', plans: Object.values(plans).map(({ entitlements, ...p }) => ({ ...p, entitlements, productId: p.id === 'free' ? null : billing.productIds()[p.id] })), proHighlights, billing: { googlePlay: billing.configured() }, googleSignIn: config.googleClientIds.length > 0, webSearch: Boolean(config.braveKey), vision: true, localAi: { status: config.allowLocalProviders ? 'available' : 'coming_soon' } });
     if (method === 'GET' && path === '/v1/models/catalog') return send(res, 200, { providers: Object.entries(providerCatalog).map(([id, value]) => ({ id, name: value.name, kind: value.kind, models: value.models, localOnly: Boolean(value.localOnly), keyOptional: Boolean(value.keyOptional) })) });
 
     // Google Play Real-time developer notifications (Pub/Sub push); authenticated by a shared secret in the URL.
@@ -257,7 +274,7 @@ const handler = async (req, res) => {
 
     const me = auth(req, store);
     let params;
-    if (method === 'GET' && path === '/v1/me') { const user = store.find('users', x => x.id === me.sub); await billing.refresh(me.sub); return send(res, 200, { ...publicUser(user), memoryEnabled: user.memoryEnabled, customInstructions: user.customInstructions || '', subscription: billing.entitlement(me.sub) }); }
+    if (method === 'GET' && path === '/v1/me') { const user = store.find('users', x => x.id === me.sub); await billing.refresh(me.sub); return send(res, 200, { ...publicUser(user), memoryEnabled: user.memoryEnabled, customInstructions: user.customInstructions || '', subscription: planView(me.sub) }); }
     if (method === 'PATCH' && path === '/v1/me') {
       const body = await jsonBody(req); const user = store.find('users', x => x.id === me.sub);
       const updated = store.update('users', me.sub, { name: body.name === undefined ? user.name : requireText(body.name, 'name', 100), customInstructions: body.customInstructions === undefined ? user.customInstructions : sanitizeText(body.customInstructions, 4000) });
@@ -343,6 +360,8 @@ const handler = async (req, res) => {
       const conversation = owner('conversations', params.id, me.sub); if (!conversation) throw notFound();
       const body = await jsonBody(req); const attachments = parseAttachments(body.attachments);
       const content = attachments.length ? sanitizeText(body.content, 50000).trim() : requireText(body.content, 'content', 50000); const { connection, model } = resolveConnection(me, body, conversation);
+      if (body.webSearch === true) consumeDaily(me.sub, 'webSearchesPerDay');
+      consumeDaily(me.sub, 'imagesPerDay', attachments.length);
       const userMessage = store.insert('messages', { conversationId: conversation.id, userId: me.sub, role: 'user', content, attachments, parentId: null, citations: [], status: 'complete' });
       const options = { me, conversation, connection, model, userMessage, temperature: temperatureOf(body.temperature), webSearch: body.webSearch === true };
       if (streaming) return void await generate({ ...options, res });
@@ -354,8 +373,9 @@ const handler = async (req, res) => {
       const messages = conversationMessages(conversation.id); const lastUser = messages.findLast(x => x.role === 'user');
       if (!lastUser) throw httpError(400, 'Nothing to regenerate yet');
       const stale = new Set(messages.filter(x => x.role === 'assistant' && x.createdAt >= lastUser.createdAt && x.id !== lastUser.id).map(x => x.id));
-      store.remove('messages', x => stale.has(x.id));
       const { connection, model } = resolveConnection(me, body, conversation);
+      if (body.webSearch === true) consumeDaily(me.sub, 'webSearchesPerDay');
+      store.remove('messages', x => stale.has(x.id));
       return void await generate({ me, conversation, connection, model, userMessage: lastUser, temperature: temperatureOf(body.temperature), webSearch: body.webSearch === true, res });
     }
     if (method === 'POST' && (params = route(path, '/v1/conversations/:id/edit'))) {
@@ -365,6 +385,7 @@ const handler = async (req, res) => {
       if (!original) throw httpError(404, 'Message not found');
       const content = original.attachments?.length ? sanitizeText(body.content, 50000).trim() : requireText(body.content, 'content', 50000);
       const { connection, model } = resolveConnection(me, body, conversation);
+      if (body.webSearch === true) consumeDaily(me.sub, 'webSearchesPerDay');
       store.remove('messages', x => x.conversationId === conversation.id && x.createdAt >= original.createdAt);
       const userMessage = store.insert('messages', { conversationId: conversation.id, userId: me.sub, role: 'user', content, attachments: original.attachments || [], parentId: null, citations: [], status: 'complete', editedFrom: original.id });
       return void await generate({ me, conversation, connection, model, userMessage, temperature: temperatureOf(body.temperature), webSearch: body.webSearch === true, res });
@@ -425,7 +446,7 @@ const handler = async (req, res) => {
 
     if (method === 'GET' && path === '/v1/prompts') return send(res, 200, { items: store.filter('prompts', x => x.userId === me.sub).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)), templates: builtInPrompts });
     if (method === 'POST' && path === '/v1/prompts') {
-      const body = await jsonBody(req); if (store.filter('prompts', x => x.userId === me.sub).length >= 200) throw httpError(400, 'You can save up to 200 prompts');
+      const body = await jsonBody(req); enforceLimit(me.sub, 'savedPrompts', store.filter('prompts', x => x.userId === me.sub).length);
       return send(res, 201, store.insert('prompts', { userId: me.sub, title: requireText(body.title, 'title', 100), content: requireText(body.content, 'content', 10000) }));
     }
     if (method === 'PATCH' && (params = route(path, '/v1/prompts/:id'))) {
@@ -442,13 +463,13 @@ const handler = async (req, res) => {
 
     if (method === 'GET' && path === '/v1/usage') return send(res, 200, usageSummary(me.sub, Math.min(Math.max(Number(url.searchParams.get('days')) || 30, 1), 365)));
 
-    if (method === 'GET' && path === '/v1/subscription') { await billing.refresh(me.sub); return send(res, 200, billing.entitlement(me.sub)); }
+    if (method === 'GET' && path === '/v1/subscription') { await billing.refresh(me.sub); return send(res, 200, planView(me.sub)); }
     if (method === 'POST' && (path === '/v1/billing/google/verify' || path === '/v1/billing/google/restore')) {
       const body = await jsonBody(req); const tokens = Array.isArray(body.purchaseTokens) ? body.purchaseTokens.slice(0, 10) : [body.purchaseToken];
       let result = null; let lastError = null;
       for (const token of tokens) { try { result = await billing.verify(me.sub, requireText(token, 'purchaseToken', 5000)); } catch (error) { lastError = error; } }
       if (!result) throw lastError || httpError(400, 'purchaseToken is required');
-      return send(res, 200, result);
+      return send(res, 200, planView(me.sub));
     }
 
     if (method === 'GET' && path === '/v1/admin/health') { if (me.role !== 'admin') throw httpError(403, 'Forbidden'); return send(res, 200, { users: store.data.users.filter(x => !x.deletedAt).length, conversations: store.data.conversations.length, files: store.data.files.length, activeSubscriptions: store.data.subscriptions.filter(x => ['active', 'grace', 'cancelled'].includes(x.status) && Date.parse(x.expiresAt) > Date.now()).length, auditEvents: store.data.audit.length }); }

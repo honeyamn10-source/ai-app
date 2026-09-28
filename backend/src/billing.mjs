@@ -5,11 +5,27 @@ import { decryptSecret, encryptSecret, hashToken, safeEqual } from './security.m
 
 const failure = (status, message) => Object.assign(new Error(message), { status });
 
+const freeLimits = { providers: 3, projects: 3, files: 25, memories: 50, researchPerDay: 50, webSearchesPerDay: 3, imagesPerDay: 5, savedPrompts: 5, historyMessages: 20, ragChunks: 4 };
+const proLimits = { providers: 50, projects: 200, files: 2000, memories: 2000, researchPerDay: 1000, webSearchesPerDay: 200, imagesPerDay: 500, savedPrompts: 200, historyMessages: 100, ragChunks: 10 };
+const proEntitlements = ['byok', 'basic_chat', 'basic_research', 'basic_exports', 'pro_chat', 'web_search', 'vision', 'long_memory', 'deep_document_search', 'unlimited_projects', 'large_knowledge_base', 'priority_research'];
+
 export const plans = Object.freeze({
-  free: { id: 'free', tier: 'free', price: 0, currency: 'USD', entitlements: ['byok', 'basic_chat', 'basic_research', 'basic_exports'], limits: { providers: 3, projects: 3, files: 25, memories: 50, researchPerDay: 50 } },
-  monthly: { id: 'monthly', tier: 'pro', price: 1, currency: 'USD', period: 'P1M', entitlements: ['byok', 'basic_chat', 'basic_research', 'basic_exports', 'pro_chat', 'unlimited_projects', 'large_knowledge_base', 'priority_research'], limits: { providers: 50, projects: 200, files: 2000, memories: 2000, researchPerDay: 1000 } },
-  annual: { id: 'annual', tier: 'pro', price: 10, currency: 'USD', period: 'P1Y', entitlements: ['byok', 'basic_chat', 'basic_research', 'basic_exports', 'pro_chat', 'unlimited_projects', 'large_knowledge_base', 'priority_research'], limits: { providers: 50, projects: 200, files: 2000, memories: 2000, researchPerDay: 1000 } }
+  free: { id: 'free', tier: 'free', price: 0, currency: 'USD', entitlements: ['byok', 'basic_chat', 'basic_research', 'basic_exports'], limits: freeLimits },
+  monthly: { id: 'monthly', tier: 'pro', price: 1, currency: 'USD', period: 'P1M', entitlements: proEntitlements, limits: proLimits },
+  annual: { id: 'annual', tier: 'pro', price: 10, currency: 'USD', period: 'P1Y', entitlements: proEntitlements, limits: proLimits }
 });
+
+/** What Pro adds, for paywalls and the plans screen. */
+export const proHighlights = Object.freeze([
+  { key: 'webSearchesPerDay', title: 'Live web search in chat', free: '3 per day', pro: '200 per day' },
+  { key: 'imagesPerDay', title: 'Ask about photos', free: '5 images per day', pro: '500 per day' },
+  { key: 'historyMessages', title: 'Conversation memory', free: 'Last 20 messages', pro: 'Last 100 messages' },
+  { key: 'ragChunks', title: 'Document search depth', free: '4 excerpts per answer', pro: '10 excerpts per answer' },
+  { key: 'projects', title: 'Projects', free: '3', pro: '200' },
+  { key: 'files', title: 'Knowledge files', free: '25', pro: '2,000' },
+  { key: 'savedPrompts', title: 'Saved prompts', free: '5', pro: '200' },
+  { key: 'researchPerDay', title: 'Research searches', free: '50 per day', pro: '1,000 per day' }
+]);
 
 const stateMap = {
   SUBSCRIPTION_STATE_ACTIVE: 'active', SUBSCRIPTION_STATE_IN_GRACE_PERIOD: 'grace', SUBSCRIPTION_STATE_ON_HOLD: 'on_hold',

@@ -21,7 +21,15 @@ import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 
-data class PlanOffer(val productId: String, val title: String, val price: String, val details: ProductDetails, val offerToken: String)
+/** [trial] is e.g. "7-day free trial" when Google Play offers this user a free phase. */
+data class PlanOffer(val productId: String, val title: String, val price: String, val details: ProductDetails, val offerToken: String, val trial: String? = null)
+
+/** Converts an ISO-8601 billing period such as P7D, P1W or P1M into "7-day", "1-week", "1-month". */
+fun describePeriod(iso: String): String? {
+    val match = Regex("^P(\\d+)([DWMY])$").find(iso) ?: return null
+    val unit = when (match.groupValues[2]) { "D" -> "day"; "W" -> "week"; "M" -> "month"; else -> "year" }
+    return "${match.groupValues[1]}-$unit"
+}
 
 sealed interface PurchaseOutcome {
     data class Purchased(val tokens: List<String>) : PurchaseOutcome
@@ -62,10 +70,13 @@ class BillingManager(context: Context) : PurchasesUpdatedListener {
         val details: List<ProductDetails> = client.queryProductDetails(params).productDetailsList ?: emptyList()
         return details.mapNotNull { product ->
             val offers = product.subscriptionOfferDetails.orEmpty()
-            // Base plan (no offerId) first; promotional offers can be added later deliberately.
-            val offer = offers.firstOrNull { it.offerId == null } ?: offers.firstOrNull() ?: return@mapNotNull null
-            val price = offer.pricingPhases.pricingPhaseList.lastOrNull()?.formattedPrice ?: return@mapNotNull null
-            PlanOffer(product.productId, product.name, price, product, offer.offerToken)
+            // Play only returns offers this user is eligible for: prefer a free trial, otherwise the base plan.
+            val trialOffer = offers.firstOrNull { o -> o.pricingPhases.pricingPhaseList.any { it.priceAmountMicros == 0L } }
+            val offer = trialOffer ?: offers.firstOrNull { it.offerId == null } ?: offers.firstOrNull() ?: return@mapNotNull null
+            val phases = offer.pricingPhases.pricingPhaseList
+            val price = phases.lastOrNull()?.formattedPrice ?: return@mapNotNull null
+            val trial = phases.firstOrNull { it.priceAmountMicros == 0L }?.let { describePeriod(it.billingPeriod) }?.let { "$it free trial" }
+            PlanOffer(product.productId, product.name, price, product, offer.offerToken, trial)
         }.sortedBy { productIds.indexOf(it.productId) }
     }
 

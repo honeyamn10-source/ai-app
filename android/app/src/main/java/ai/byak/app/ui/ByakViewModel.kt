@@ -21,7 +21,7 @@ data class UiState(
     val projects: List<Project> = emptyList(), val files: List<UserFile> = emptyList(), val research: List<ResearchResult> = emptyList(),
     val profile: Profile? = null, val subscription: Subscription = Subscription.FREE, val offers: List<PlanOffer> = emptyList(),
     val memoryEnabled: Boolean = false, val memories: List<Memory> = emptyList(), val usage: Usage? = null, val devices: List<Device> = emptyList(),
-    val modelOptions: Map<String, List<String>> = emptyMap(), val upgradeSuggested: Boolean = false,
+    val modelOptions: Map<String, List<String>> = emptyMap(), val upgradeSuggested: Boolean = false, val upgradeReason: String? = null,
     // composer
     val drafts: List<ImageDraft> = emptyList(), val webSearch: Boolean = false, val editing: ChatMessage? = null,
     val generationStatus: String? = null, val composerPrefill: String? = null,
@@ -51,13 +51,16 @@ class ByakViewModel(private val api: ApiClient, private val billing: BillingMana
     private fun update(block: UiState.() -> UiState) = _state.update(block)
     private fun notice(message: String) = update { copy(notice = message) }
     fun clearMessages() = update { copy(error = null, notice = null) }
-    fun dismissUpgrade() = update { copy(upgradeSuggested = false) }
+    fun showUpgrade(reason: String) = update { copy(upgradeSuggested = true, upgradeReason = reason) }
+    fun dismissUpgrade() = update { copy(upgradeSuggested = false, upgradeReason = null) }
+    /** Plan limits open the upgrade sheet with the server's explanation instead of a generic error. */
+    private fun failed(e: ApiException) = update { if (e.code == "plan_limit") copy(upgradeSuggested = true, upgradeReason = e.message) else copy(error = e.message) }
 
     private fun task(success: String? = null, block: suspend () -> Unit) = viewModelScope.launch {
         update { copy(busy = true, error = null) }
         try { block(); success?.let { if (state.value.notice == null) notice(it) } }
         catch (e: CancellationException) { throw e }
-        catch (e: ApiException) { update { copy(error = e.message, upgradeSuggested = e.code == "plan_limit" || upgradeSuggested) } }
+        catch (e: ApiException) { failed(e) }
         catch (e: Exception) { update { copy(error = e.message ?: "Something went wrong") } }
         finally { update { copy(busy = false) } }
     }
@@ -143,8 +146,19 @@ class ByakViewModel(private val api: ApiClient, private val billing: BillingMana
 
     fun startEdit(message: ChatMessage) { if (!state.value.streaming) update { copy(editing = message, composerPrefill = message.content) } }
     fun cancelEdit() = update { copy(editing = null, composerPrefill = "") }
-    fun toggleWebSearch() = update { copy(webSearch = !webSearch) }
-    fun addDraft(image: ImageDraft) { if (state.value.drafts.size >= 4) update { copy(error = "You can attach up to 4 images") } else update { copy(drafts = drafts + image) } }
+    fun toggleWebSearch() {
+        val sub = state.value.subscription
+        // Turning Web on with no searches left today goes straight to the upgrade sheet.
+        if (!state.value.webSearch && !sub.isPro && sub.limits.isNotEmpty() && sub.webSearchesLeft == 0) {
+            update { copy(upgradeSuggested = true, upgradeReason = "You've used today's ${sub.limits["webSearchesPerDay"]} free web searches. They reset at midnight UTC.") }
+            return
+        }
+        update { copy(webSearch = !webSearch) }
+    }
+    fun addDraft(image: ImageDraft) {
+        val sub = state.value.subscription
+        if (!sub.isPro && sub.limits.isNotEmpty() && state.value.drafts.size >= sub.imagesLeft) { update { copy(upgradeSuggested = true, upgradeReason = "You've used today's ${sub.limits["imagesPerDay"]} free photo questions. They reset at midnight UTC.") }; return }
+        if (state.value.drafts.size >= 4) update { copy(error = "You can attach up to 4 images") } else update { copy(drafts = drafts + image) } }
     fun removeDraft(image: ImageDraft) = update { copy(drafts = drafts - image) }
     fun consumePrefill() = update { copy(composerPrefill = null) }
 
@@ -173,7 +187,11 @@ class ByakViewModel(private val api: ApiClient, private val billing: BillingMana
                     }
                 }
             } catch (e: CancellationException) { /* stopped by the user; the server keeps the partial answer */ }
-            catch (e: ApiException) { update { copy(error = e.message, upgradeSuggested = e.code == "plan_limit" || upgradeSuggested) } }
+            catch (e: ApiException) {
+                failed(e)
+                // Blocked before anything was saved: give the message and photos back so nothing is lost.
+                if (e.code == "plan_limit") prefix.firstOrNull()?.let { sent -> update { copy(composerPrefill = sent.content, drafts = sent.localImages) } }
+            }
             catch (e: Exception) { update { copy(error = e.message ?: "Generation failed") } }
             finally {
                 update { copy(streaming = false, generationStatus = null) }
@@ -181,6 +199,7 @@ class ByakViewModel(private val api: ApiClient, private val billing: BillingMana
                     delay(250) // let the server persist a stopped/partial answer
                     runCatching { api.messages(conversation.id) }.onSuccess { list -> if (state.value.activeConversation?.id == conversation.id) update { copy(messages = list) } }
                     runCatching { refreshConversations() }
+                    runCatching { api.subscription() }.onSuccess { sub -> update { copy(subscription = sub) } } // refresh "N left today"
                 }
             }
         }

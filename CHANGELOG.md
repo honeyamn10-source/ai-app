@@ -4,6 +4,14 @@ Notable repository changes are recorded here.
 
 ## 0.3.0
 
+### BYAK Pro
+- Pro-only headroom enforced on the server: live web search in chat (Free 3/day, Pro 200/day), photo questions
+  (Free 5 images/day, Pro 500/day), conversation memory (Free last 20 messages, Pro 100), document search depth
+  (Free 4 excerpts, Pro 10) and saved prompts (Free 5, Pro 200).
+- The app shows what's left today on the Web and photo buttons, explains exactly which limit was hit in an
+  upgrade sheet, restores the blocked message, and presents a redesigned Pro screen with a Free vs Pro table.
+- Free trials: if a trial offer exists in Play Console, eligible users see "Start 7-day free trial".
+
 ### Added
 - Photo attachments for vision models (OpenAI, Anthropic, Gemini), downscaled on-device before upload.
 - Web search in chat and automatic reading of pasted links, with clickable web citations.

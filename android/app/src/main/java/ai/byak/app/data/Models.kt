@@ -24,6 +24,8 @@ data class SavedPrompt(val id: String, val title: String, val content: String, v
     /** Template text with the {{input}} marker removed, ready for the composer. */
     val composerText: String get() = content.replace("{{input}}", "").trimEnd() + if (content.contains("{{input}}")) "\n" else ""
 }
+/** One row of the Free vs Pro comparison, served by the backend so limits stay in one place. */
+data class ProHighlight(val key: String, val title: String, val free: String, val pro: String)
 data class Device(val id: String, val device: String, val lastUsedAt: String, val current: Boolean)
 data class ModelUsage(val provider: String, val model: String, val requests: Int, val inputTokens: Long, val outputTokens: Long)
 data class DayUsage(val day: String, val requests: Int, val tokens: Long)
@@ -31,9 +33,12 @@ data class Usage(val requests: Int, val inputTokens: Long, val outputTokens: Lon
 data class Profile(val name: String, val email: String, val memoryEnabled: Boolean, val customInstructions: String, val hasPassword: Boolean)
 data class Subscription(
     val plan: String, val tier: String, val status: String, val expiresAt: String?, val autoRenewing: Boolean,
-    val productId: String?, val billingAccountId: String, val verificationAvailable: Boolean, val limits: Map<String, Int>
+    val productId: String?, val billingAccountId: String, val verificationAvailable: Boolean, val limits: Map<String, Int>,
+    val webSearchesToday: Int = 0, val imagesToday: Int = 0, val highlights: List<ProHighlight> = emptyList()
 ) {
     val isPro get() = tier == "pro"
+    val webSearchesLeft get() = ((limits["webSearchesPerDay"] ?: 0) - webSearchesToday).coerceAtLeast(0)
+    val imagesLeft get() = ((limits["imagesPerDay"] ?: 0) - imagesToday).coerceAtLeast(0)
     companion object { val FREE = Subscription("free", "free", "active", null, false, null, "", false, emptyMap()) }
 }
 

@@ -164,8 +164,15 @@ import kotlinx.coroutines.launch
                     }
                 }
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    IconButton(onClick = { photoPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) }, enabled = state.editing == null && state.drafts.size < 4) { Icon(Icons.Outlined.AddPhotoAlternate, "Attach image") }
-                    FilterChip(selected = state.webSearch, onClick = vm::toggleWebSearch, label = { Text("Web") }, leadingIcon = { Icon(Icons.Outlined.Language, null, Modifier.size(16.dp)) })
+                    val sub = state.subscription; val metered = !sub.isPro && sub.limits.isNotEmpty()
+                    IconButton(onClick = {
+                        if (metered && sub.imagesLeft <= state.drafts.size) vm.showUpgrade("You've used today's ${sub.limits["imagesPerDay"]} free photo questions. They reset at midnight UTC.")
+                        else photoPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+                    }, enabled = state.editing == null && state.drafts.size < 4) {
+                        if (metered) BadgedBox(badge = { Badge { Text("${(sub.imagesLeft - state.drafts.size).coerceAtLeast(0)}") } }) { Icon(Icons.Outlined.AddPhotoAlternate, "Attach image, ${sub.imagesLeft} free today") }
+                        else Icon(Icons.Outlined.AddPhotoAlternate, "Attach image")
+                    }
+                    FilterChip(selected = state.webSearch, onClick = vm::toggleWebSearch, label = { Text(if (metered) "Web · ${sub.webSearchesLeft} left" else "Web") }, leadingIcon = { Icon(Icons.Outlined.Language, null, Modifier.size(16.dp)) })
                     Spacer(Modifier.width(4.dp))
                     IconButton(onClick = { vm.loadPrompts(); choosingPrompt = true }) { Icon(Icons.Outlined.AutoStories, "Prompt library") }
                     Spacer(Modifier.weight(1f))

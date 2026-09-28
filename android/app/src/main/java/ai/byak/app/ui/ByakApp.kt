@@ -15,6 +15,7 @@ import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -64,13 +65,7 @@ fun Context.findActivity(): Activity? = when (this) { is Activity -> this; is Co
             else -> destination = Destination.Home
         }
     }
-    if (state.upgradeSuggested) AlertDialog(
-        onDismissRequest = vm::dismissUpgrade, icon = { Icon(Icons.Outlined.WorkspacePremium, null) }, title = { Text("You've reached a free plan limit") },
-        text = { Text("BYAK Pro raises every limit — more projects, a larger knowledge base and more research — for about the price of a coffee a year.") },
-        confirmButton = { Button(onClick = { vm.dismissUpgrade(); destination = Destination.Plan }) { Text("See plans") } },
-        dismissButton = { TextButton(onClick = vm::dismissUpgrade) { Text("Not now") } }
-    )
-
+    if (state.upgradeSuggested) UpgradeDialog(state, onDismiss = vm::dismissUpgrade) { vm.dismissUpgrade(); destination = Destination.Plan }
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val wide = maxWidth >= 720.dp
         ModalNavigationDrawer(drawerState = drawer, gesturesEnabled = !wide && drawer.isOpen, drawerContent = {
@@ -124,4 +119,27 @@ fun Context.findActivity(): Activity? = when (this) { is Activity -> this; is Co
         Spacer(Modifier.height(12.dp))
         Destination.entries.forEach { item -> NavigationDrawerItem(label = { Text(item.title) }, icon = { Icon(item.icon, null) }, selected = selected == item, onClick = { navigate(item) }) }
     }
+}
+
+/** Paywall shown when a free-plan limit is hit: says exactly what was blocked and what Pro unlocks. */
+@Composable private fun UpgradeDialog(state: UiState, onDismiss: () -> Unit, onSeePlans: () -> Unit) {
+    val perks = state.subscription.highlights.take(4).ifEmpty { defaultHighlights.take(4) }
+    AlertDialog(
+        onDismissRequest = onDismiss, icon = { Icon(Icons.Outlined.WorkspacePremium, null, tint = MaterialTheme.colorScheme.primary) },
+        title = { Text("Unlock more with BYAK Pro") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text(state.upgradeReason ?: "You've reached a free plan limit.")
+                perks.forEach { perk ->
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Outlined.CheckCircle, null, Modifier.size(18.dp), tint = MaterialTheme.colorScheme.secondary); Spacer(Modifier.width(8.dp))
+                        Text("${perk.title}: ", fontWeight = FontWeight.SemiBold); Text(perk.pro)
+                    }
+                }
+                Text("From about $1 a month. Cancel anytime in Google Play.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        },
+        confirmButton = { Button(onClick = onSeePlans) { Text("See Pro plans") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Not now") } }
+    )
 }

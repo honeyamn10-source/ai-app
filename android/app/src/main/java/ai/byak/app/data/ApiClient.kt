@@ -242,5 +242,8 @@ private fun JSONObject.toProject() = Project(getString("id"), getString("name"),
 private fun JSONObject.toFile() = UserFile(getString("id"), getString("name"), optString("mimeType"), optInt("chunkCount"), optLong("size"), nullableString("projectId"))
 internal fun JSONObject.toSubscription(): Subscription {
     val limits = optJSONObject("limits")?.let { json -> json.keys().asSequence().associateWith { json.optInt(it) } }.orEmpty()
-    return Subscription(optString("plan", "free"), optString("tier", "free"), optString("status", "active"), nullableString("expiresAt"), optBoolean("autoRenewing"), nullableString("productId"), optString("billingAccountId"), optBoolean("verificationAvailable"), limits)
+    val usage = optJSONObject("usageToday")
+    val highlights = optJSONArray("highlights")?.objects().orEmpty().map { ProHighlight(it.optString("key"), it.optString("title"), it.optString("free"), it.optString("pro")) }
+    return Subscription(optString("plan", "free"), optString("tier", "free"), optString("status", "active"), nullableString("expiresAt"), optBoolean("autoRenewing"), nullableString("productId"), optString("billingAccountId"), optBoolean("verificationAvailable"), limits,
+        usage?.optInt("webSearches") ?: 0, usage?.optInt("images") ?: 0, highlights)
 }

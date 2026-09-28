@@ -1,6 +1,8 @@
 package ai.byak.app
 
+import ai.byak.app.billing.describePeriod
 import ai.byak.app.data.SavedPrompt
+import ai.byak.app.data.Subscription
 import ai.byak.app.data.SettingsStore
 import ai.byak.app.data.SseParser
 import ai.byak.app.data.StreamEvent
@@ -38,5 +40,15 @@ class FeaturesTest {
         val parser = SseParser()
         val events = "event: status\ndata: {\"message\":\"Searching the web…\"}\n\n".split("\n").mapNotNull(parser::feed)
         assertEquals(listOf(StreamEvent.Status("Searching the web…")), events)
+    }
+
+    @Test fun trialPeriodsAreReadable() {
+        assertEquals("7-day", describePeriod("P7D")); assertEquals("1-week", describePeriod("P1W")); assertEquals("1-month", describePeriod("P1M"))
+        assertNull(describePeriod("P1Y2M"))
+    }
+
+    @Test fun dailyAllowancesNeverGoNegative() {
+        val sub = Subscription.FREE.copy(limits = mapOf("webSearchesPerDay" to 3, "imagesPerDay" to 5), webSearchesToday = 4, imagesToday = 2)
+        assertEquals(0, sub.webSearchesLeft); assertEquals(3, sub.imagesLeft)
     }
 }
