@@ -1,6 +1,6 @@
 package ai.byak.app
 
-import ai.byak.app.billing.BillingManager
+import ai.byak.app.billing.BillingCatalog
 import ai.byak.app.data.local.VectorCodec
 import ai.byak.app.data.localai.PortableModelStatus
 import ai.byak.app.data.repository.providerFailure
@@ -120,7 +120,7 @@ class ModelsTest {
     }
 
     @Test fun playProductIdentifiersRemainStable() {
-        assertEquals("byak_monthly_1", BillingManager.MONTHLY)
-        assertEquals("byak_annual_10", BillingManager.ANNUAL)
+        assertEquals("byak_pro", BillingCatalog.PRODUCT_ID)
+        assertEquals(listOf("monthly", "yearly"), BillingCatalog.basePlanOrder)
     }
 }
