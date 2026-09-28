@@ -79,15 +79,23 @@ async function* sseData(body) {
 
 const parse = value => { try { return JSON.parse(value); } catch { return null; } };
 
+/** Merges consecutive same-role turns (some APIs require alternation) and keeps any attached images. */
 function mergeTurns(messages) {
   const result = [];
   for (const m of messages) {
-    if (!m.content) continue;
+    const images = m.images || [];
+    if (!m.content && !images.length) continue;
     const last = result.at(-1);
-    if (last && last.role === m.role) last.content += `\n\n${m.content}`; else result.push({ role: m.role, content: m.content });
+    if (last && last.role === m.role) { last.content = [last.content, m.content].filter(Boolean).join('\n\n'); last.images.push(...images); }
+    else result.push({ role: m.role, content: m.content || '', images: [...images] });
   }
   return result;
 }
+
+// Provider-specific shapes for a turn that may carry images ({ mimeType, data(base64) }).
+const anthropicTurn = m => ({ role: m.role, content: m.images.length ? [...m.images.map(i => ({ type: 'image', source: { type: 'base64', media_type: i.mimeType, data: i.data } })), { type: 'text', text: m.content || 'Describe this image.' }] : m.content });
+const geminiTurn = m => ({ role: m.role === 'assistant' ? 'model' : 'user', parts: [...m.images.map(i => ({ inline_data: { mime_type: i.mimeType, data: i.data } })), { text: m.content || 'Describe this image.' }] });
+const openaiTurn = m => ({ role: m.role, content: m.images.length ? [{ type: 'text', text: m.content || 'Describe this image.' }, ...m.images.map(i => ({ type: 'image_url', image_url: { url: `data:${i.mimeType};base64,${i.data}` } }))] : m.content });
 
 /**
  * Streams a chat completion. Calls onDelta(text) for each chunk and resolves to { text, usage, stopReason }.
@@ -105,7 +113,7 @@ export async function streamChat(connection, { model, messages, temperature, sig
 
   if (catalog.kind === 'anthropic') {
     const { url } = await endpoint(connection, '/messages');
-    const body = { model, max_tokens: 16000, stream: true, messages: turns };
+    const body = { model, max_tokens: 16000, stream: true, messages: turns.map(anthropicTurn) };
     if (system) body.system = system;
     if (typeof temperature === 'number') body.temperature = temperature;
     const response = await fetch(url, { method: 'POST', headers: headers(connection, catalog), body: JSON.stringify(body), signal: abort });
@@ -120,7 +128,7 @@ export async function streamChat(connection, { model, messages, temperature, sig
     if (stopReason === 'refusal' && !text) emit('The model declined to answer this request.');
   } else if (catalog.kind === 'gemini') {
     const { url } = await endpoint(connection, `/models/${encodeURIComponent(model)}:streamGenerateContent?alt=sse`);
-    const body = { contents: turns.map(m => ({ role: m.role === 'assistant' ? 'model' : 'user', parts: [{ text: m.content }] })) };
+    const body = { contents: turns.map(geminiTurn) };
     if (system) body.systemInstruction = { parts: [{ text: system }] };
     if (typeof temperature === 'number') body.generationConfig = { temperature };
     const response = await fetch(url, { method: 'POST', headers: headers(connection, catalog), body: JSON.stringify(body), signal: abort });
@@ -135,7 +143,7 @@ export async function streamChat(connection, { model, messages, temperature, sig
     }
   } else {
     const { url } = await endpoint(connection, '/chat/completions');
-    const body = { model, stream: true, messages: [...(system ? [{ role: 'system', content: system }] : []), ...turns] };
+    const body = { model, stream: true, messages: [...(system ? [{ role: 'system', content: system }] : []), ...turns.map(openaiTurn)] };
     if (catalog.usageOption) body.stream_options = { include_usage: true };
     if (typeof temperature === 'number') body.temperature = temperature;
     const response = await fetch(url, { method: 'POST', headers: headers(connection, catalog), body: JSON.stringify(body), signal: abort });

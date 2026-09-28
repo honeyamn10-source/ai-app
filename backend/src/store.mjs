@@ -3,7 +3,7 @@ import { dirname } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { config } from './config.mjs';
 
-const collections = ['users', 'sessions', 'providers', 'conversations', 'messages', 'projects', 'files', 'memories', 'subscriptions', 'subscriptionEvents', 'usage', 'audit'];
+const collections = ['users', 'sessions', 'providers', 'conversations', 'messages', 'projects', 'files', 'memories', 'prompts', 'subscriptions', 'subscriptionEvents', 'usage', 'audit'];
 const empty = () => Object.fromEntries(collections.map(name => [name, []]));
 
 export class Store {

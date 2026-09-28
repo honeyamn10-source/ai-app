@@ -6,6 +6,7 @@ import { auth, clientIp, httpError, jsonBody, route, send, sse } from './http.mj
 import { assertSafeRemoteUrl, encryptSecret, hashPassword, hashToken, maskSecret, sanitizeText, signToken, verifyPassword, verifyToken } from './security.mjs';
 import { listRemoteModels, providerCatalog, streamChat, validateProvider } from './providers.mjs';
 import { buildRagContext, chunkText, retrieve } from './rag.mjs';
+import { builtInPrompts } from './prompts.mjs';
 import { githubSearch, readUrl, redditSearch, webSearch } from './research.mjs';
 import { createBilling, plans } from './billing.mjs';
 
@@ -36,7 +37,7 @@ function enforceLimit(userId, key, current) {
 // ---------- views ----------
 const publicUser = user => ({ id: user.id, email: user.email, name: user.name, role: user.role, createdAt: user.createdAt, hasPassword: Boolean(user.passwordHash), googleLinked: Boolean(user.googleSub) });
 const safeProvider = c => ({ id: c.id, provider: c.provider, name: c.name, baseUrl: c.baseUrl, defaultModel: c.defaultModel, enabled: c.enabled !== false, maskedKey: c.maskedKey, lastValidatedAt: c.lastValidatedAt || null, createdAt: c.createdAt });
-const messageView = m => ({ id: m.id, conversationId: m.conversationId, role: m.role, content: m.content, parentId: m.parentId || null, citations: m.citations || [], status: m.status || 'complete', model: m.model || null, usage: m.usage || null, createdAt: m.createdAt });
+const messageView = m => ({ id: m.id, conversationId: m.conversationId, role: m.role, content: m.content, parentId: m.parentId || null, citations: m.citations || [], attachments: (m.attachments || []).map((a, index) => ({ index, type: a.type, mimeType: a.mimeType, size: a.size })), status: m.status || 'complete', model: m.model || null, usage: m.usage || null, createdAt: m.createdAt });
 const conversationMessages = id => store.filter('messages', x => x.conversationId === id).sort((a, b) => a.createdAt.localeCompare(b.createdAt));
 const conversationView = item => ({ ...item, messages: conversationMessages(item.id).map(messageView) });
 const conversationSummary = item => { const last = store.data.messages.findLast(x => x.conversationId === item.id); return { ...item, preview: last ? last.content.slice(0, 140) : '', messageCount: store.data.messages.filter(x => x.conversationId === item.id).length }; };
@@ -54,8 +55,43 @@ function rotateTokens(user, session) {
 }
 const refreshMatches = (token, stored) => (stored.includes('.') ? verifyPassword(token, stored) : hashToken(token) === stored);
 
+// ---------- attachments & web context ----------
+const imageTypes = new Set(['image/png', 'image/jpeg', 'image/webp', 'image/gif']);
+function parseAttachments(value) {
+  if (value === undefined || value === null) return [];
+  if (!Array.isArray(value)) throw httpError(400, 'attachments must be an array');
+  if (value.length > 4) throw httpError(400, 'Attach at most 4 images per message');
+  return value.map(item => {
+    const mimeType = String(item?.mimeType || '').toLowerCase();
+    if (item?.type !== 'image' || !imageTypes.has(mimeType)) throw httpError(415, 'Attachments must be PNG, JPEG, WebP or GIF images');
+    const data = String(item.data || '').replace(/^data:[^,]*,/, '').replace(/\s+/g, '');
+    const size = Buffer.from(data, 'base64').length;
+    if (!size) throw httpError(400, 'Attachment is empty');
+    if (size > 5 * 1024 * 1024) throw httpError(413, 'Each image must be 5 MB or smaller');
+    return { type: 'image', mimeType, data, size };
+  });
+}
+
+const urlPattern = /https:\/\/[^\s<>()"']+/g;
+/** Gathers live web context: a web search when requested, plus the text of up to 3 links in the message. Failures become notes, never errors. */
+async function webContext(content, { search }, onStatus) {
+  const sources = []; const notes = [];
+  if (search) {
+    onStatus('Searching the web…');
+    try { for (const r of (await webSearch(content.slice(0, 400))).slice(0, 5)) sources.push({ title: r.title, url: r.url, text: r.summary || '' }); }
+    catch (error) { notes.push(`Web search unavailable: ${error.message}`); }
+  }
+  const links = [...new Set(content.match(urlPattern) || [])].map(u => u.replace(/[.,;:!?]+$/, '')).slice(0, 3);
+  for (const link of links) {
+    onStatus(`Reading ${new URL(link).hostname}…`);
+    try { const page = await readUrl(link); sources.push({ title: page.title || new URL(page.url).hostname, url: page.url, text: page.text.slice(0, 8000) }); }
+    catch (error) { notes.push(`Could not read ${link}: ${error.message}`); }
+  }
+  return { sources, notes };
+}
+
 // ---------- prompt assembly ----------
-function buildContext(userId, conversation, query) {
+function buildContext(userId, conversation, query, web = { sources: [], notes: [] }) {
   const user = store.find('users', x => x.id === userId);
   const project = conversation.projectId ? owner('projects', conversation.projectId, userId) : null;
   const files = store.filter('files', x => x.userId === userId && (!project || x.projectId === project.id));
@@ -68,24 +104,35 @@ function buildContext(userId, conversation, query) {
     user.customInstructions ? `The user's standing instructions:\n${user.customInstructions}` : '',
     project?.instructions ? `Project "${project.name}" instructions:\n${project.instructions}` : '',
     memories.length ? `Things the user asked you to remember:\n${memories.map(m => `- ${m.content}`).join('\n')}` : '',
-    matches.length ? `Relevant excerpts from the user's documents. Cite them like [Document source 1] when you use them:\n${buildRagContext(matches)}` : ''
+    matches.length ? `Relevant excerpts from the user's documents. Cite them like [Document source 1] when you use them:\n${buildRagContext(matches)}` : '',
+    web.sources.length ? `Live web results fetched just now. Cite them like [Web source 1] and prefer them for recent facts:\n${web.sources.map((x, i) => `[Web source ${i + 1}: ${x.title}](${x.url})\n${x.text}`).join('\n\n')}` : '',
+    web.notes.length ? `Notes about web access: ${web.notes.join(' ')}` : ''
   ].filter(Boolean).join('\n\n');
-  const citations = matches.map((x, i) => ({ id: i + 1, fileId: x.fileId, title: x.fileName, chunk: x.index, score: x.score }));
+  const citations = [
+    ...matches.map((x, i) => ({ id: i + 1, kind: 'document', fileId: x.fileId, title: x.fileName, chunk: x.index, score: x.score })),
+    ...web.sources.map((x, i) => ({ id: i + 1, kind: 'web', title: x.title, url: x.url }))
+  ];
   return { system, citations };
 }
 
 function autoTitle(content) { const line = content.replace(/\s+/g, ' ').trim(); if (line.length <= 60) return line; const cut = line.slice(0, 60); return `${cut.slice(0, cut.lastIndexOf(' ') > 30 ? cut.lastIndexOf(' ') : 60)}…`; }
 
 /** Runs one assistant turn. When `res` is given the answer is streamed as SSE and a client disconnect stops generation (keeping the partial answer). */
-async function generate({ me, conversation, connection, model, userMessage, temperature, res }) {
-  const { system, citations } = buildContext(me.sub, conversation, userMessage.content);
-  const history = conversationMessages(conversation.id).filter(x => x.status !== 'error').slice(-config.historyMessages).map(x => ({ role: x.role, content: x.content }));
+async function generate({ me, conversation, connection, model, userMessage, temperature, webSearch: search = false, res }) {
   const controller = new AbortController(); let partial = '';
   if (res) {
     res.writeHead(200, { 'content-type': 'text/event-stream; charset=utf-8', 'cache-control': 'no-cache, no-transform', connection: 'keep-alive', 'x-accel-buffering': 'no' });
     res.on('close', () => { if (!res.writableFinished) controller.abort(); });
-    sse(res, 'message_start', { userMessageId: userMessage.id, conversationId: conversation.id, model, citations });
   }
+  const web = await webContext(userMessage.content, { search }, message => { if (res) sse(res, 'status', { message }); });
+  const { system, citations } = buildContext(me.sub, conversation, userMessage.content, web);
+  // Images are sent with the message being answered; earlier ones are summarised to keep requests small.
+  const history = conversationMessages(conversation.id).filter(x => x.status !== 'error').slice(-config.historyMessages).map(x => {
+    const images = x.attachments?.filter(a => a.type === 'image') || [];
+    if (x.id === userMessage.id) return { role: x.role, content: x.content, images: images.map(({ mimeType, data }) => ({ mimeType, data })) };
+    return { role: x.role, content: images.length ? `${x.content}\n[${images.length} image(s) were attached to this message]` : x.content };
+  });
+  if (res) sse(res, 'message_start', { userMessageId: userMessage.id, conversationId: conversation.id, model, citations });
   const finish = (content, status, usage) => {
     const assistant = store.insert('messages', { conversationId: conversation.id, userId: me.sub, role: 'assistant', content, parentId: userMessage.id, citations, status, model, providerId: connection.id, usage });
     store.update('conversations', conversation.id, { title: conversation.title === 'New conversation' ? autoTitle(userMessage.content) : conversation.title, providerId: connection.id, model });
@@ -126,6 +173,7 @@ function exportUser(userId) {
     projects: store.filter('projects', x => x.userId === userId),
     files: store.filter('files', x => x.userId === userId).map(({ chunks, ...file }) => ({ ...file, chunks })),
     memories: store.filter('memories', x => x.userId === userId),
+    prompts: store.filter('prompts', x => x.userId === userId),
     providers: store.filter('providers', x => x.userId === userId).map(safeProvider),
     subscriptions: store.filter('subscriptions', x => x.userId === userId).map(({ tokenEncrypted, tokenHash, ...s }) => s),
     usage: store.filter('usage', x => x.userId === userId)
@@ -159,7 +207,7 @@ const handler = async (req, res) => {
     if (path !== '/health') rateLimit(`${clientIp(req)}:${isAuth ? 'auth' : 'api'}`, isAuth ? config.authRateLimit : config.apiRateLimit);
 
     if (method === 'GET' && path === '/health') return send(res, 200, { status: 'ok', service: 'byak-api', version: VERSION, time: now() });
-    if (method === 'GET' && path === '/v1/config') return send(res, 200, { name: 'BYAK AI', version: VERSION, tagline: 'Bring Your API Key. Bring Your Intelligence.', plans: Object.values(plans).map(({ entitlements, ...p }) => ({ ...p, entitlements, productId: p.id === 'free' ? null : billing.productIds()[p.id] })), billing: { googlePlay: billing.configured() }, googleSignIn: config.googleClientIds.length > 0, webSearch: Boolean(config.braveKey), localAi: { status: config.allowLocalProviders ? 'available' : 'coming_soon' } });
+    if (method === 'GET' && path === '/v1/config') return send(res, 200, { name: 'BYAK AI', version: VERSION, tagline: 'Bring Your API Key. Bring Your Intelligence.', plans: Object.values(plans).map(({ entitlements, ...p }) => ({ ...p, entitlements, productId: p.id === 'free' ? null : billing.productIds()[p.id] })), billing: { googlePlay: billing.configured() }, googleSignIn: config.googleClientIds.length > 0, webSearch: Boolean(config.braveKey), vision: true, localAi: { status: config.allowLocalProviders ? 'available' : 'coming_soon' } });
     if (method === 'GET' && path === '/v1/models/catalog') return send(res, 200, { providers: Object.entries(providerCatalog).map(([id, value]) => ({ id, name: value.name, kind: value.kind, models: value.models, localOnly: Boolean(value.localOnly), keyOptional: Boolean(value.keyOptional) })) });
 
     // Google Play Real-time developer notifications (Pub/Sub push); authenticated by a shared secret in the URL.
@@ -230,7 +278,7 @@ const handler = async (req, res) => {
       const plan = billing.entitlement(me.sub);
       const conversationIds = new Set(store.filter('conversations', x => x.userId === me.sub).map(x => x.id));
       store.remove('messages', x => x.userId === me.sub || conversationIds.has(x.conversationId));
-      for (const collection of ['sessions', 'providers', 'conversations', 'projects', 'files', 'memories', 'subscriptions', 'subscriptionEvents', 'usage']) store.remove(collection, x => x.userId === me.sub);
+      for (const collection of ['sessions', 'providers', 'conversations', 'projects', 'files', 'memories', 'prompts', 'subscriptions', 'subscriptionEvents', 'usage']) store.remove(collection, x => x.userId === me.sub);
       store.update('users', me.sub, { deletedAt: now(), email: `deleted-${me.sub}@invalid.local`, name: 'Deleted user', passwordHash: null, googleSub: null, customInstructions: '' }); store.audit(me.sub, 'account.deleted');
       return send(res, 200, { deleted: true, activeSubscription: plan.tier !== 'free', notice: plan.tier !== 'free' ? 'Cancel your subscription in Google Play to stop future renewals.' : undefined });
     }
@@ -293,10 +341,12 @@ const handler = async (req, res) => {
     if (method === 'POST' && ((params = route(path, '/v1/conversations/:id/messages')) || (params = route(path, '/v1/conversations/:id/stream')))) {
       const streaming = path.endsWith('/stream');
       const conversation = owner('conversations', params.id, me.sub); if (!conversation) throw notFound();
-      const body = await jsonBody(req); const content = requireText(body.content, 'content', 50000); const { connection, model } = resolveConnection(me, body, conversation);
-      const userMessage = store.insert('messages', { conversationId: conversation.id, userId: me.sub, role: 'user', content, parentId: null, citations: [], status: 'complete' });
-      if (streaming) return void await generate({ me, conversation, connection, model, userMessage, temperature: temperatureOf(body.temperature), res });
-      const assistant = await generate({ me, conversation, connection, model, userMessage, temperature: temperatureOf(body.temperature) });
+      const body = await jsonBody(req); const attachments = parseAttachments(body.attachments);
+      const content = attachments.length ? sanitizeText(body.content, 50000).trim() : requireText(body.content, 'content', 50000); const { connection, model } = resolveConnection(me, body, conversation);
+      const userMessage = store.insert('messages', { conversationId: conversation.id, userId: me.sub, role: 'user', content, attachments, parentId: null, citations: [], status: 'complete' });
+      const options = { me, conversation, connection, model, userMessage, temperature: temperatureOf(body.temperature), webSearch: body.webSearch === true };
+      if (streaming) return void await generate({ ...options, res });
+      const assistant = await generate(options);
       return send(res, 201, messageView(assistant));
     }
     if (method === 'POST' && (params = route(path, '/v1/conversations/:id/regenerate'))) {
@@ -306,7 +356,24 @@ const handler = async (req, res) => {
       const stale = new Set(messages.filter(x => x.role === 'assistant' && x.createdAt >= lastUser.createdAt && x.id !== lastUser.id).map(x => x.id));
       store.remove('messages', x => stale.has(x.id));
       const { connection, model } = resolveConnection(me, body, conversation);
-      return void await generate({ me, conversation, connection, model, userMessage: lastUser, temperature: temperatureOf(body.temperature), res });
+      return void await generate({ me, conversation, connection, model, userMessage: lastUser, temperature: temperatureOf(body.temperature), webSearch: body.webSearch === true, res });
+    }
+    if (method === 'POST' && (params = route(path, '/v1/conversations/:id/edit'))) {
+      // Replaces a user message and everything after it, then answers the edited message.
+      const conversation = owner('conversations', params.id, me.sub); if (!conversation) throw notFound(); const body = await jsonBody(req);
+      const original = store.find('messages', x => x.id === body.messageId && x.conversationId === conversation.id && x.role === 'user');
+      if (!original) throw httpError(404, 'Message not found');
+      const content = original.attachments?.length ? sanitizeText(body.content, 50000).trim() : requireText(body.content, 'content', 50000);
+      const { connection, model } = resolveConnection(me, body, conversation);
+      store.remove('messages', x => x.conversationId === conversation.id && x.createdAt >= original.createdAt);
+      const userMessage = store.insert('messages', { conversationId: conversation.id, userId: me.sub, role: 'user', content, attachments: original.attachments || [], parentId: null, citations: [], status: 'complete', editedFrom: original.id });
+      return void await generate({ me, conversation, connection, model, userMessage, temperature: temperatureOf(body.temperature), webSearch: body.webSearch === true, res });
+    }
+    if (method === 'GET' && (params = route(path, '/v1/conversations/:id/messages/:messageId/attachments/:index'))) {
+      const conversation = owner('conversations', params.id, me.sub); if (!conversation) throw notFound();
+      const attachment = store.find('messages', x => x.id === params.messageId && x.conversationId === conversation.id)?.attachments?.[Number(params.index)];
+      if (!attachment) throw notFound();
+      res.writeHead(200, { 'content-type': attachment.mimeType, 'cache-control': 'private, max-age=86400', 'content-length': attachment.size }); res.end(Buffer.from(attachment.data, 'base64')); return;
     }
     if (method === 'DELETE' && (params = route(path, '/v1/conversations/:id/messages/:messageId'))) {
       const conversation = owner('conversations', params.id, me.sub); if (!conversation) throw notFound();
@@ -355,6 +422,17 @@ const handler = async (req, res) => {
       store.audit(me.sub, 'research.search', { source }); return send(res, 200, { query, source, items });
     }
     if (method === 'POST' && path === '/v1/tools/url-reader') { const body = await jsonBody(req); return send(res, 200, await readUrl(requireText(body.url, 'url', 2000))); }
+
+    if (method === 'GET' && path === '/v1/prompts') return send(res, 200, { items: store.filter('prompts', x => x.userId === me.sub).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)), templates: builtInPrompts });
+    if (method === 'POST' && path === '/v1/prompts') {
+      const body = await jsonBody(req); if (store.filter('prompts', x => x.userId === me.sub).length >= 200) throw httpError(400, 'You can save up to 200 prompts');
+      return send(res, 201, store.insert('prompts', { userId: me.sub, title: requireText(body.title, 'title', 100), content: requireText(body.content, 'content', 10000) }));
+    }
+    if (method === 'PATCH' && (params = route(path, '/v1/prompts/:id'))) {
+      const prompt = owner('prompts', params.id, me.sub); if (!prompt) throw notFound(); const body = await jsonBody(req);
+      return send(res, 200, store.update('prompts', prompt.id, { title: body.title === undefined ? prompt.title : requireText(body.title, 'title', 100), content: body.content === undefined ? prompt.content : requireText(body.content, 'content', 10000) }));
+    }
+    if (method === 'DELETE' && (params = route(path, '/v1/prompts/:id'))) { if (!store.remove('prompts', x => x.id === params.id && x.userId === me.sub)) throw notFound(); return send(res, 200, { ok: true }); }
 
     if (method === 'GET' && path === '/v1/memory') { const user = store.find('users', x => x.id === me.sub); return send(res, 200, { enabled: user.memoryEnabled, items: store.filter('memories', x => x.userId === me.sub) }); }
     if (method === 'PUT' && path === '/v1/memory/settings') { const body = await jsonBody(req); const user = store.update('users', me.sub, { memoryEnabled: Boolean(body.enabled) }); return send(res, 200, { enabled: user.memoryEnabled }); }
