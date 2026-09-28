@@ -2,6 +2,30 @@
 
 Notable repository changes are recorded here.
 
+## 3.1.0 — versionCode 35
+
+Google Play already holds `versionCode 34` (`3.0.1`) from the `release/byak-v3.0.1-*` line, which
+has diverged from `main`. This release continues on `main` at 35 so Play accepts it. Google Play
+rejects a reused or lower versionCode, so **raise `versionCode` before every upload**.
+
+### Added
+- `Publish to Google Play` workflow: manual run with `track` and `rollout_fraction`, JDK 17,
+  signing validation, signed AAB retained as an artifact, uploaded through fastlane supply.
+  `internal` ignores the fraction; `alpha`/`beta`/`production` send `status: inProgress` with it.
+- `scripts/validate-release-signing.sh` runs before every release build and refuses to build
+  unless all four signing values are present, the payload is a real JKS, the store and key
+  passwords open it, the alias holds a private key, and the certificate matches the pinned
+  fingerprint.
+- `BYAK_MIN_VERSION_CODE` guard: the build fails rather than uploading a versionCode Play has
+  already used.
+- A real `docs/legal/PRIVACY_POLICY.md` and `docs/legal/TERMS.md` describing the on-device app,
+  plus `scripts/build-legal-pages.py` to publish them as standalone pages. The render fails while
+  `[[...]]` operator placeholders remain, because Play rejects a policy with no operator identity.
+
+### Fixed
+- The signed release AAB was gated on an env var that `GITHUB_ENV` cannot set, so
+  `BYAK-AI-release-aab` was never uploaded. It is now gated on a step output.
+
 ## 1.0.0 — production
 
 ### Play requirements

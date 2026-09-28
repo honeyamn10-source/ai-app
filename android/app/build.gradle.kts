@@ -11,8 +11,11 @@ android {
         applicationId = "ai.byak.app"
         minSdk = 26
         targetSdk = 36
-        versionCode = 6
-        versionName = "1.0.0"
+        // Play already holds versionCode 34 (3.0.1) from the release/byak-v3.0.1-* line.
+        // Google Play rejects a reused or lower versionCode, so this line continues at 35.
+        // Raise this after every successful upload.
+        versionCode = 35
+        versionName = "3.1.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         fun prop(name: String, fallback: String) = (project.findProperty(name) as String?)?.takeIf { it.isNotBlank() } ?: System.getenv(name)?.takeIf { it.isNotBlank() } ?: fallback
         buildConfigField("String", "API_BASE_URL", "\"${prop("BYAK_API_URL", "http://10.0.2.2:8787")}\"")
@@ -54,6 +57,23 @@ android {
 kotlin {
     compilerOptions {
         jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
+    }
+}
+
+// Lets the release workflow read the version it just built, so it can refuse to
+// upload a bundle whose versionCode is not higher than what Play already has.
+// Google Play rejects a lower or reused versionCode, and the release branches in
+// this repository do not share a single monotonic version line with main.
+tasks.register("releaseVersionInfo") {
+    val versionCode = android.defaultConfig.versionCode
+    val versionName = android.defaultConfig.versionName
+    val applicationId = android.defaultConfig.applicationId
+    doLast {
+        val out = layout.buildDirectory.file("release-version-info.txt").get().asFile
+        out.parentFile.mkdirs()
+        out.writeText("versionCode=$versionCode\nversionName=$versionName\napplicationId=$applicationId\n")
+        logger.lifecycle("BYAK_RELEASE_VERSION_CODE=$versionCode")
+        logger.lifecycle("BYAK_RELEASE_VERSION_NAME=$versionName")
     }
 }
 
