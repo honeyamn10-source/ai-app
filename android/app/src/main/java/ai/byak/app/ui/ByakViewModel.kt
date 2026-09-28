@@ -193,9 +193,9 @@ class ByakViewModel(private val api: ApiClient, private val billing: BillingMana
     fun deleteAccount() = task { api.deleteAccount()?.let { message -> notice(message) } }
 
     // ---------- billing ----------
-    fun loadPlans(productIds: List<String>) = task {
+    fun loadPlans(productId: String, basePlanIds: List<String>) = task {
         val sub = api.subscription(); update { copy(subscription = sub) }
-        val offers = runCatching { billing.offers(productIds) }.getOrDefault(emptyList()); update { copy(offers = offers) }
+        val offers = runCatching { billing.offers(productId, basePlanIds) }.getOrDefault(emptyList()); update { copy(offers = offers) }
     }
     fun buy(activity: Activity, offer: PlanOffer) {
         val accountId = state.value.subscription.billingAccountId
