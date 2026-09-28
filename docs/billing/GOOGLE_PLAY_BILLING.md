@@ -15,10 +15,10 @@ subscriptions table ◀── POST /v1/billing/google/rtdn ◀── Pub/Sub (re
 ## 1. Play Console
 
 1. Upload a signed build of `ai.byak.app` to an internal testing track (billing only works for apps installed from Play).
-2. **Monetize → Subscriptions**: create `monthly` (P1M) and `yearly` (P1Y), each with one active base plan. Set prices per country.
+2. **Monetize → Subscriptions**: create the subscription product `byak_pro`, then add active base plans `monthly` (P1M) and `yearly` (P1Y). Set prices per country.
 3. **Setup → License testing**: add your test accounts so purchases are free and renew quickly.
 
-Different product ids? Set `PLAY_MONTHLY_PRODUCT_ID` / `PLAY_ANNUAL_PRODUCT_ID` on the server and `BYAK_PLAY_MONTHLY_PRODUCT_ID` / `BYAK_PLAY_ANNUAL_PRODUCT_ID` for the Android build.
+Different identifiers? Set `PLAY_SUBSCRIPTION_PRODUCT_ID`, `PLAY_MONTHLY_BASE_PLAN_ID`, and `PLAY_ANNUAL_BASE_PLAN_ID` on the server, with the matching `BYAK_` properties for the Android build.
 
 ## 2. Server credentials
 
