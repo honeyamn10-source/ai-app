@@ -159,7 +159,7 @@ class SettingsViewModel @Inject constructor(
     }
 
     fun clearConnectionMessage() = connection.update { ConnectionUiState() }
-    fun purchase(activity: Activity, productId: String) = billingManager.purchase(activity, productId)
+    fun purchase(activity: Activity, planId: String) = billingManager.purchase(activity, planId)
     fun restorePurchases() = billingManager.restore()
     fun signOut() = viewModelScope.launch { authRepository.signOut() }
 }
