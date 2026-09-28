@@ -161,6 +161,17 @@ curl -sS -o /dev/null -w '%{http_code}\n' \
   Users and permissions → Invite users, or the upload is rejected. This is the only Play credential
   still missing.
 
+### Verified end to end on 2026-09-28
+
+A real run of the workflow on `main` (`36405309704`) confirms the build job passes completely:
+signing validation, the `versionCode 35 > 34` floor, and signer check against
+`76:A5:…:4F:02:94`. The upload job installs fastlane 2.240.1 and then stops at the service
+account check above, which is the intended behaviour with no credential configured.
+
+Two bugs were only found by running it, not by validating the YAML:
+`ruby/setup-ruby` failed because the repo had no `.ruby-version`, and the versionCode floor
+exited 0 when `BYAK_MIN_VERSION_CODE` was unset. Both are fixed.
+
 ## 6. Store listing and policy forms
 
 - **Privacy policy URL** — the page from step 3, not the homepage.
