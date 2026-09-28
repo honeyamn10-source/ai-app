@@ -23,7 +23,31 @@ jobs:
         with: { distribution: temurin, java-version: 17 }
       - uses: gradle/actions/setup-gradle@v4
         with: { gradle-version: '8.13' }
+      - name: Decode upload keystore (only when signing secrets are configured)
+        env:
+          KEYSTORE_B64: ${{ secrets.BYAK_UPLOAD_KEYSTORE_BASE64 }}
+        run: |
+          if [ -n "$KEYSTORE_B64" ]; then
+            echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/upload.jks"
+            echo "BYAK_KEYSTORE_FILE=$RUNNER_TEMP/upload.jks" >> "$GITHUB_ENV"
+          fi
       - run: gradle -p android lintDebug testDebugUnitTest assembleDebug bundleRelease
+        env:
+          BYAK_KEYSTORE_PASSWORD: ${{ secrets.BYAK_KEYSTORE_PASSWORD }}
+          BYAK_KEY_ALIAS: ${{ secrets.BYAK_KEY_ALIAS }}
+          BYAK_KEY_PASSWORD: ${{ secrets.BYAK_KEY_PASSWORD }}
+          BYAK_GOOGLE_WEB_CLIENT_ID: ${{ vars.BYAK_GOOGLE_WEB_CLIENT_ID }}
+          BYAK_SUPPORT_EMAIL: ${{ vars.BYAK_SUPPORT_EMAIL }}
+          BYAK_PRIVACY_POLICY_URL: ${{ vars.BYAK_PRIVACY_POLICY_URL }}
+          BYAK_TERMS_URL: ${{ vars.BYAK_TERMS_URL }}
+      - name: Upload signed Play bundle
+        if: env.BYAK_KEYSTORE_FILE != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: BYAK-AI-release-aab
+          path: android/app/build/outputs/bundle/release/app-release.aab
+          if-no-files-found: error
+          retention-days: 30
       - name: Upload lint and test reports
         if: failure()
         uses: actions/upload-artifact@v4

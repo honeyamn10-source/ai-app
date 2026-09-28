@@ -70,7 +70,10 @@ class LocalApi(
         return profile to subscription()
     }
     suspend fun setIdentity(name: String, email: String) = store.write { db -> db.meta.put("name", name).put("email", email) }
-    override suspend fun updateProfile(name: String, customInstructions: String) { store.write { db -> db.meta.put("name", name).put("customInstructions", customInstructions) } }
+    override suspend fun updateProfile(name: String, customInstructions: String) {
+        val email = store.write { db -> db.meta.put("name", name).put("customInstructions", customInstructions); db.meta.optString("email") }
+        sessions.updateProfile(name, email) // keeps the Home greeting and drawer in sync
+    }
     override suspend fun changePassword(current: String, new: String) { throw ApiException("On-device mode has no password: your data is protected by your phone's lock screen.", 400) }
     override suspend fun exportData(): String = store.read { db -> db.export().apply { optJSONObject("meta")?.remove("braveKey"); put("providers", JSONArray(db.all("providers").map { JSONObject(it.toString()).apply { remove("secret") } })) }.toString(2) }
     override suspend fun devices(): List<Device> = listOf(Device("this", "This phone", Instant.now().toString(), current = true))
@@ -106,8 +109,8 @@ class LocalApi(
     override suspend fun deleteProvider(id: String) { store.write { db -> db.remove("providers") { it.optString("id") == id }; db.all("conversations").filter { it.optString("providerId") == id }.forEach { c -> db.update("conversations", c.getString("id")) { it.remove("providerId") } } } }
 
     // ---------- conversations ----------
-    private fun JSONObject.toConversation(db: LocalStore.Db): Conversation {
-        val last = db.all("messages").lastOrNull { it.optString("conversationId") == getString("id") }
+    private fun JSONObject.toConversation(db: LocalStore.Db, lastMessages: Map<String, JSONObject>? = null): Conversation {
+        val last = lastMessages?.get(getString("id")) ?: if (lastMessages == null) db.all("messages").lastOrNull { it.optString("conversationId") == getString("id") } else null
         return Conversation(getString("id"), optString("title", "New conversation"), optString("providerId").ifBlank { null }, optString("model"), optString("projectId").ifBlank { null }, optBoolean("pinned"), last?.optString("content")?.take(140).orEmpty(), optString("updatedAt"))
     }
     private fun JSONObject.toMessage(): ChatMessage = ChatMessage(
@@ -120,7 +123,7 @@ class LocalApi(
         db.all("conversations").filter { it.optBoolean("archived") == archived }
             .filter { c -> q.isBlank() || c.optString("title").lowercase().contains(q) || messages.any { it.optString("conversationId") == c.getString("id") && it.optString("content").lowercase().contains(q) } }
             .sortedWith(compareByDescending<JSONObject> { it.optBoolean("pinned") }.thenByDescending { it.optString("updatedAt") })
-            .map { it.toConversation(db) }
+            .let { list -> val lastByConversation = messages.associateBy { it.optString("conversationId") }; list.map { it.toConversation(db, lastByConversation) } }
     }
     override suspend fun createConversation(providerId: String?, model: String, projectId: String?): Conversation = store.write { db ->
         db.insert("conversations", JSONObject().put("title", "New conversation").put("providerId", providerId ?: "").put("model", model).put("projectId", projectId ?: "").put("pinned", false).put("archived", false)).toConversation(db)
@@ -202,7 +205,7 @@ class LocalApi(
         val (system, citations) = store.read { db ->
             val memories = if (db.meta.optBoolean("memoryEnabled")) db.all("memories").takeLast(50).map { it.optString("content") } else emptyList()
             val files = db.all("files").filter { project == null || it.optString("projectId") == project.getString("id") }
-            val candidates = files.flatMap { f -> f.optJSONArray("chunks").objects().map { ch -> Triple(f.getString("id"), f.optString("name"), Rag.Chunk(ch.optInt("index"), ch.optString("text"))) } }
+            val candidates = files.flatMap { f -> chunksOf(f).map { ch -> Triple(f.getString("id"), f.optString("name"), ch) } }
             val matches = Rag.retrieve(question, candidates, limits.getValue("ragChunks"))
             val text = listOfNotNull(
                 "You are BYAK AI, a helpful, accurate assistant. Today is ${LocalDate.now()}. Use Markdown formatting when it helps readability.",
@@ -234,9 +237,10 @@ class LocalApi(
         } catch (e: CancellationException) {
             if (partial.isNotEmpty()) kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) { save(partial, "stopped", 0, 0) }
             throw e
-        } catch (e: ApiException) {
+        } catch (e: Exception) {
+            // Any failure keeps what was already written, so a dropped connection never loses an answer.
             if (partial.isNotEmpty()) save(partial, "stopped", 0, 0)
-            send(StreamEvent.Failed(e.message ?: "Generation failed"))
+            send(StreamEvent.Failed((e as? ApiException)?.message ?: e.message ?: "Generation failed"))
         }
     }
 
@@ -278,17 +282,25 @@ class LocalApi(
         val results = when (source) { "github" -> gateway.githubSearch(query); "reddit" -> gateway.redditSearch(query); else -> gateway.webSearch(query, braveKey()) }
         return results.map { ResearchResult(it.title, it.url, it.text) }
     }
-    private fun JSONObject.toFile() = UserFile(getString("id"), optString("name"), optString("mimeType"), optJSONArray("chunks")?.length() ?: 0, optLong("size"), optString("projectId").ifBlank { null })
+    private fun JSONObject.toFile() = UserFile(getString("id"), optString("name"), optString("mimeType"), if (has("chunkCount")) optInt("chunkCount") else optJSONArray("chunks")?.length() ?: 0, optLong("size"), optString("projectId").ifBlank { null })
+    /** Chunks live in a blob per file (older installs kept them inline, which is still read). */
+    private fun chunksOf(file: JSONObject): List<Rag.Chunk> {
+        val array = file.optJSONArray("chunks") ?: store.readBlob("file-${file.getString("id")}.json")?.let { runCatching { JSONArray(it) }.getOrNull() }
+        return array.objects().map { Rag.Chunk(it.optInt("index"), it.optString("text")) }
+    }
     override suspend fun files(): List<UserFile> = store.read { db -> db.all("files").map { it.toFile() } }
     override suspend fun uploadText(name: String, mimeType: String, content: String, projectId: String?): UserFile {
         if (content.isBlank()) throw ApiException("File is empty", 400)
         enforce("files", files().size)
         val text = if (mimeType == "text/html") content.stripHtml() else content
         val chunks = Rag.chunk(text)
-        return store.write { db -> db.insert("files", JSONObject().put("name", name).put("mimeType", mimeType).put("size", content.toByteArray().size).put("projectId", projectId ?: "")
-            .put("chunks", JSONArray(chunks.map { JSONObject().put("index", it.index).put("text", it.text) }))).toFile() }
+        return store.write { db ->
+            val row = db.insert("files", JSONObject().put("name", name).put("mimeType", mimeType).put("size", content.toByteArray().size).put("projectId", projectId ?: "").put("chunkCount", chunks.size))
+            store.writeBlob("file-${row.getString("id")}.json", JSONArray(chunks.map { JSONObject().put("index", it.index).put("text", it.text) }).toString())
+            row.toFile()
+        }
     }
-    override suspend fun deleteFile(id: String) { store.write { db -> db.remove("files") { it.optString("id") == id } } }
+    override suspend fun deleteFile(id: String) { store.write { db -> db.remove("files") { it.optString("id") == id }; store.deleteBlob("file-$id.json") } }
 
     // ---------- prompts, memory, usage ----------
     override suspend fun prompts(): Pair<List<SavedPrompt>, List<SavedPrompt>> = store.read { db -> db.all("prompts").sortedByDescending { it.optString("updatedAt") }.map { SavedPrompt(it.getString("id"), it.optString("title"), it.optString("content")) } } to BuiltInPrompts.all

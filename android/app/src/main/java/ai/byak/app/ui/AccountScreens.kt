@@ -46,7 +46,7 @@ private val playBasePlans get() = listOf(BuildConfig.PLAY_YEARLY_BASE_PLAN, Buil
     val server by settings.serverUrl.collectAsState(initial = ""); val themeMode by settings.themeMode.collectAsState(initial = ThemeMode.System); val dynamic by settings.dynamicColor.collectAsState(initial = false)
     var editingServer by remember { mutableStateOf(false) }; var appearance by remember { mutableStateOf(false) }
     var editingSearchKey by remember { mutableStateOf(false) }; var aboutLocal by remember { mutableStateOf(false) }
-    var hasSearchKey by remember { mutableStateOf(false) }
+    var hasSearchKey by remember { mutableStateOf(false) }; var legal by remember { mutableStateOf(false) }
     LaunchedEffect(editingSearchKey) { if (!editingSearchKey) hasSearchKey = vm.hasWebSearchKey() }
     var deleting by remember { mutableStateOf(false) }; var editingProfile by remember { mutableStateOf(false) }; var changingPassword by remember { mutableStateOf(false) }
     val exporter = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
@@ -75,18 +75,36 @@ private val playBasePlans get() = listOf(BuildConfig.PLAY_YEARLY_BASE_PLAN, Buil
             item { SettingsRow(Icons.Outlined.PhoneAndroid, "Where your data lives", "On this phone only · keys encrypted with the Android Keystore") { aboutLocal = true } }
         } else item { SettingsRow(Icons.Outlined.Dns, "Server", server.removePrefix("https://").removePrefix("http://")) { editingServer = true } }
         item { SettingsRow(Icons.Outlined.Download, "Export my data", "Chats, projects, files and memory as JSON") { exporter.launch("byak-export.json") } }
+        item { SettingsRow(Icons.Outlined.Policy, "Privacy policy & terms", "How BYAK handles your data") { legal = true } }
+        if (BuildConfig.SUPPORT_EMAIL.isNotBlank()) item { SettingsRow(Icons.Outlined.SupportAgent, "Help & feedback", BuildConfig.SUPPORT_EMAIL) { runCatching { context.startActivity(Intent(Intent.ACTION_SENDTO, Uri.parse("mailto:${BuildConfig.SUPPORT_EMAIL}")).putExtra(Intent.EXTRA_SUBJECT, "BYAK AI ${BuildConfig.VERSION_NAME} feedback")) } } }
         item { OutlinedButton(onClick = { vm.logout() }, Modifier.fillMaxWidth()) { Icon(Icons.AutoMirrored.Outlined.Logout, null); Text(" Sign out") } }
         item { TextButton(onClick = { deleting = true }, Modifier.fillMaxWidth(), colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error)) { Text("Delete account and data") } }
         item { Text("BYAK AI ${BuildConfig.VERSION_NAME}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.fillMaxWidth().padding(top = 8.dp)) }
     }
     if (deleting) ConfirmDialog(if (vm.isLocal) "Erase all BYAK data on this phone?" else "Delete your account?", "This permanently removes provider keys, chats, files, projects and memory." + if (sub.isPro) " Also cancel your subscription in Google Play to stop renewals." else "", "Delete permanently", onDismiss = { deleting = false }) { deleting = false; vm.deleteAccount() }
     if (editingProfile) ProfileDialog(state.profile?.name ?: session.name, state.profile?.customInstructions.orEmpty(), onDismiss = { editingProfile = false }) { name, instructions -> vm.saveProfile(name, instructions); editingProfile = false }
+    if (legal) LegalDialog(onDismiss = { legal = false })
     if (editingSearchKey) TextInputDialog("Brave Search API key", "", "Paste your key from api.search.brave.com", onDismiss = { editingSearchKey = false }) { key -> vm.setWebSearchKey(key); editingSearchKey = false }
     if (aboutLocal) AlertDialog(onDismissRequest = { aboutLocal = false }, confirmButton = { Button(onClick = { aboutLocal = false }) { Text("OK") } }, title = { Text("BYAK runs on your phone") },
         text = { Text("Your chats, files, projects and memory are stored only in this app's private storage. API keys are encrypted with a hardware-backed Android Keystore key and sent only to the AI provider you chose. Uninstalling the app or \"Erase all data\" deletes everything — use Export my data to keep a copy.") })
     if (editingServer) ServerDialog(server, settings, onDismiss = { editingServer = false }) { changed -> editingServer = false; if (changed) vm.logout() }
     if (appearance) AppearanceDialog(themeMode, dynamic, onDismiss = { appearance = false }) { mode, dyn -> scope.launch { settings.setThemeMode(mode); settings.setDynamicColor(dyn) }; appearance = false }
     if (changingPassword) PasswordDialog(onDismiss = { changingPassword = false }) { current, new -> vm.changePassword(current, new) { changingPassword = false } }
+}
+
+/** Links to the hosted policy/terms when configured, and always shows a plain-language summary. */
+@Composable private fun LegalDialog(onDismiss: () -> Unit) {
+    val context = LocalContext.current
+    fun open(url: String) = runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) }
+    AlertDialog(onDismissRequest = onDismiss, title = { Text("Privacy & terms") }, confirmButton = { Button(onClick = onDismiss) { Text("Close") } },
+        text = { Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("• BYAK stores your chats, files, projects and memory on this phone. API keys are encrypted with the Android Keystore.")
+            Text("• Your messages, and any photos or files you use as context, are sent only to the AI provider you choose, under that provider's terms.")
+            Text("• Web search sends your question to Wikipedia or, if you add a key, Brave Search. Purchases are handled by Google Play.")
+            Text("• AI answers can be wrong. Check important information, and use the flag button to report harmful responses.")
+            if (BuildConfig.PRIVACY_POLICY_URL.isNotBlank()) TextButton(onClick = { open(BuildConfig.PRIVACY_POLICY_URL) }) { Text("Read the full privacy policy") }
+            if (BuildConfig.TERMS_URL.isNotBlank()) TextButton(onClick = { open(BuildConfig.TERMS_URL) }) { Text("Read the terms of service") }
+        } })
 }
 
 @Composable fun SettingsRow(icon: ImageVector, title: String, detail: String, click: () -> Unit) {

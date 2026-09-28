@@ -2,6 +2,22 @@
 
 Notable repository changes are recorded here.
 
+## 1.0.0 — production
+
+### Play requirements
+- Targets Android 16 (API 36).
+- Report button on every AI answer (Google Play AI-generated content policy).
+- Privacy & terms and Help & feedback in Settings; release signing from CI secrets produces a signed Play bundle.
+- Google Sign-In now requires the Web application client ID and the button is hidden until it is configured.
+
+### Fixed
+- Large knowledge files were held in the main on-device data file (memory pressure, slow saves); chunks now live in
+  separate files. Older installs are still read.
+- An unreadable data file could be replaced by an empty one; it is now kept aside for recovery.
+- The chat list re-scanned every message per conversation; it now takes one pass.
+- Renaming yourself in on-device mode didn't update the Home greeting.
+- A dropped or stalled connection mid-answer could hang forever or lose the partial answer.
+
 ## 0.5.0
 
 ### Fixed

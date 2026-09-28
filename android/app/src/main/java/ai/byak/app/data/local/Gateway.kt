@@ -40,7 +40,8 @@ data class Turn(val role: String, val content: String, val images: List<ImageDra
 data class Completion(val text: String, val inputTokens: Long, val outputTokens: Long, val stopReason: String?)
 
 /** Calls AI providers directly from the phone with the user's own key. */
-class Gateway(private val client: OkHttpClient = OkHttpClient.Builder().connectTimeout(20, TimeUnit.SECONDS).readTimeout(0, TimeUnit.SECONDS).build()) {
+// Reasoning models can think silently for a while before the first token, so the idle read timeout is generous.
+class Gateway(private val client: OkHttpClient = OkHttpClient.Builder().connectTimeout(20, TimeUnit.SECONDS).readTimeout(180, TimeUnit.SECONDS).build()) {
     private val json = "application/json; charset=utf-8".toMediaType()
     private val quick = client.newBuilder().readTimeout(20, TimeUnit.SECONDS).build()
 
@@ -62,7 +63,7 @@ class Gateway(private val client: OkHttpClient = OkHttpClient.Builder().connectT
     private suspend fun execute(http: OkHttpClient, request: Request): Response = withContext(Dispatchers.IO) {
         val call = http.newCall(request)
         val handle = currentCoroutineContext()[Job]?.invokeOnCompletion { call.cancel() }
-        try { call.execute() } catch (e: IOException) { handle?.dispose(); currentCoroutineContext().ensureActive(); throw ApiException("Couldn't reach ${request.url.host}. Check your internet connection.", 0) }
+        try { call.execute() } catch (e: IOException) { handle?.dispose(); currentCoroutineContext().ensureActive(); throw ApiException(if (e is java.net.SocketTimeoutException) "${request.url.host} took too long to respond. Try again." else "Couldn't reach ${request.url.host}. Check your internet connection.", 0) }
     }
 
     suspend fun listModels(c: Connection): List<String> = withContext(Dispatchers.IO) {
@@ -93,7 +94,7 @@ class Gateway(private val client: OkHttpClient = OkHttpClient.Builder().connectT
         val request = Request.Builder().url(url).auth(c).header("Accept", "text/event-stream").post(body.toString().toRequestBody(json)).build()
         var text = ""; var input = 0L; var output = 0L; var stop: String? = null
         val emit = { delta: String -> if (delta.isNotEmpty()) { text += delta; onDelta(delta) } }
-        execute(client, request).use { res ->
+        try { execute(client, request).use { res ->
             if (!res.isSuccessful) throw failure(c.name, res)
             val source = res.body?.source() ?: return@use
             while (true) {
@@ -124,6 +125,9 @@ class Gateway(private val client: OkHttpClient = OkHttpClient.Builder().connectT
                     }
                 }
             }
+        } } catch (e: IOException) {
+            currentCoroutineContext().ensureActive() // a user stop surfaces as cancellation, not as an error
+            throw ApiException(if (e is java.net.SocketTimeoutException) "${c.name} stopped responding. Try again." else "The connection to ${c.name} was interrupted. Try again.", 0)
         }
         if (stop == "refusal" && text.isEmpty()) emit("The model declined to answer this request.")
         Completion(text, input, output, stop)

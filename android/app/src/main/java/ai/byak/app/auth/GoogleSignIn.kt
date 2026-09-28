@@ -35,7 +35,7 @@ object GoogleSignIn {
     private fun explain(e: GetCredentialException): String {
         val raw = e.message.orEmpty()
         return when {
-            Regex("\\b10\\b").containsMatchIn(raw) || raw.contains("DEVELOPER_ERROR", true) -> "Google Sign-In isn't set up for this app build yet: add an Android OAuth client for ai.byak.app with the Play App Signing SHA-1 in Google Cloud Console."
+            Regex("\\b10\\b").containsMatchIn(raw) || raw.contains("DEVELOPER_ERROR", true) -> "Google Sign-In isn't set up correctly: the app needs a Web application OAuth client ID, plus an Android OAuth client for ai.byak.app with the Play app-signing SHA-1, in the same Google Cloud project."
             Regex("\\b16\\b").containsMatchIn(raw) || raw.contains("reauth", true) -> "Google couldn't verify this app. Check the SHA-1 fingerprints registered in Google Cloud Console."
             else -> raw.ifBlank { "Google Sign-In failed" }
         }
