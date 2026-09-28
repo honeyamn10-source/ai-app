@@ -11,14 +11,16 @@ android {
         applicationId = "ai.byak.app"
         minSdk = 26
         targetSdk = 35
-        versionCode = 3
-        versionName = "0.3.0"
+        versionCode = 4
+        versionName = "0.4.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         fun prop(name: String, fallback: String) = (project.findProperty(name) as String?)?.takeIf { it.isNotBlank() } ?: System.getenv(name)?.takeIf { it.isNotBlank() } ?: fallback
         buildConfigField("String", "API_BASE_URL", "\"${prop("BYAK_API_URL", "http://10.0.2.2:8787")}\"")
         buildConfigField("String", "GOOGLE_WEB_CLIENT_ID", "\"${prop("BYAK_GOOGLE_WEB_CLIENT_ID", "")}\"")
-        buildConfigField("String", "PLAY_MONTHLY_PRODUCT_ID", "\"${prop("BYAK_PLAY_MONTHLY_PRODUCT_ID", "monthly")}\"")
-        buildConfigField("String", "PLAY_ANNUAL_PRODUCT_ID", "\"${prop("BYAK_PLAY_ANNUAL_PRODUCT_ID", "yearly")}\"")
+        // Play Console: one subscription product with a base plan per billing period.
+        buildConfigField("String", "PLAY_PRODUCT_ID", "\"${prop("BYAK_PLAY_PRODUCT_ID", "byak_pro")}\"")
+        buildConfigField("String", "PLAY_MONTHLY_BASE_PLAN", "\"${prop("BYAK_PLAY_MONTHLY_BASE_PLAN", "monthly")}\"")
+        buildConfigField("String", "PLAY_YEARLY_BASE_PLAN", "\"${prop("BYAK_PLAY_YEARLY_BASE_PLAN", "yearly")}\"")
     }
     buildFeatures { compose = true; buildConfig = true }
     buildTypes {

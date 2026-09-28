@@ -236,12 +236,27 @@ import kotlinx.coroutines.launch
                     }
                     if (canRegenerate) IconButton(onClick = vm::regenerate, Modifier.size(36.dp)) { Icon(Icons.Outlined.Replay, "Regenerate", Modifier.size(18.dp)) }
                 }
+                if (canRegenerate) FollowUps(message, vm)
                 if (user && canEdit) Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                     IconButton(onClick = { vm.startEdit(message) }, Modifier.size(32.dp)) { Icon(Icons.Outlined.Edit, "Edit message", Modifier.size(16.dp)) }
                 }
             }
         }
     }
+}
+
+/** One-tap follow-ups under the latest answer. */
+@Composable private fun FollowUps(message: ChatMessage, vm: ByakViewModel) {
+    var translating by remember { mutableStateOf(false) }
+    val deviceLanguage = remember { java.util.Locale.getDefault().displayLanguage.takeUnless { it.isBlank() || it == "English" } ?: "Spanish" }
+    FlowRow(Modifier.padding(bottom = 6.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        if (message.status == "stopped") SuggestionChip(onClick = { vm.send("Continue exactly where you left off.") }, label = { Text("Continue") })
+        SuggestionChip(onClick = { vm.send("Summarize your last answer in 3 short bullet points.") }, label = { Text("Summarize") })
+        SuggestionChip(onClick = { vm.send("Explain your last answer more simply, as if I'm new to the topic.") }, label = { Text("Simplify") })
+        SuggestionChip(onClick = { vm.send("Go deeper: expand your last answer with more detail and an example.") }, label = { Text("More detail") })
+        SuggestionChip(onClick = { translating = true }, label = { Text("Translate") })
+    }
+    if (translating) TextInputDialog("Translate the answer into", deviceLanguage, "Language", onDismiss = { translating = false }) { language -> translating = false; vm.send("Translate your last answer into $language. Keep the formatting.") }
 }
 
 @Composable private fun ModelPickerDialog(state: UiState, vm: ByakViewModel, initialProvider: String?, initialModel: String, onDismiss: () -> Unit, onPick: (String, String) -> Unit) {

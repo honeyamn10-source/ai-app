@@ -29,7 +29,7 @@ import kotlinx.coroutines.launch
 
 enum class Destination(val title: String, val icon: ImageVector) {
     Home("Home", Icons.Outlined.Home), Chats("Chats", Icons.Outlined.ChatBubbleOutline), Search("Research", Icons.Outlined.TravelExplore),
-    Files("Files", Icons.Outlined.FolderOpen), Projects("Projects", Icons.Outlined.Workspaces), Prompts("Prompts", Icons.Outlined.AutoStories), Models("Models", Icons.Outlined.Hub),
+    Files("Files", Icons.Outlined.FolderOpen), Projects("Projects", Icons.Outlined.Workspaces), Prompts("Prompts", Icons.Outlined.AutoStories), Compare("Compare", Icons.Outlined.CompareArrows), Models("Models", Icons.Outlined.Hub),
     Plan("BYAK Pro", Icons.Outlined.WorkspacePremium), Memory("Memory", Icons.Outlined.Psychology), Usage("Usage", Icons.Outlined.BarChart),
     Devices("Devices", Icons.Outlined.Devices), Settings("Settings", Icons.Outlined.Settings)
 }
@@ -98,6 +98,7 @@ fun Context.findActivity(): Activity? = when (this) { is Activity -> this; is Co
                             Destination.Files -> FilesScreen(state, vm)
                             Destination.Projects -> ProjectsScreen(state, vm) { destination = Destination.Chats }
                             Destination.Prompts -> PromptsScreen(state, vm) { destination = Destination.Chats }
+                            Destination.Compare -> CompareScreen(state, vm) { destination = Destination.Models }
                             Destination.Models -> ModelsScreen(state, vm)
                             Destination.Plan -> PlanScreen(state, vm)
                             Destination.Memory -> MemoryScreen(state, vm)

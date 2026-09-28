@@ -22,7 +22,25 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 
 /** [trial] is e.g. "7-day free trial" when Google Play offers this user a free phase. */
-data class PlanOffer(val productId: String, val title: String, val price: String, val details: ProductDetails, val offerToken: String, val trial: String? = null)
+data class PlanOffer(
+    val productId: String, val basePlanId: String, val title: String, val price: String, val details: ProductDetails, val offerToken: String,
+    val trial: String? = null, val priceMicros: Long = 0, val currency: String = "", val periodMonths: Int = 1
+)
+
+/** Yearly savings versus paying monthly for 12 months, e.g. $10/yr vs $1/mo → 17. Null when not comparable. */
+fun yearlySavingsPercent(monthly: PlanOffer?, yearly: PlanOffer?): Int? =
+    if (monthly == null || yearly == null || monthly.currency != yearly.currency) null else savingsPercent(monthly.priceMicros, yearly.priceMicros)
+
+fun savingsPercent(monthlyMicros: Long, yearlyMicros: Long): Int? {
+    if (monthlyMicros <= 0 || yearlyMicros <= 0) return null
+    return kotlin.math.round((1.0 - yearlyMicros.toDouble() / (monthlyMicros * 12.0)) * 100).toInt().takeIf { it in 1..95 }
+}
+
+/** Formats a per-month equivalent such as "$0.83" in the offer's currency. */
+fun perMonth(offer: PlanOffer): String? {
+    if (offer.priceMicros <= 0 || offer.currency.isBlank() || offer.periodMonths <= 1) return null
+    return runCatching { java.text.NumberFormat.getCurrencyInstance().apply { currency = java.util.Currency.getInstance(offer.currency) }.format(offer.priceMicros / 1_000_000.0 / offer.periodMonths) }.getOrNull()
+}
 
 /** Converts an ISO-8601 billing period such as P7D, P1W or P1M into "7-day", "1-week", "1-month". */
 fun describePeriod(iso: String): String? {
@@ -62,30 +80,39 @@ class BillingManager(context: Context) : PurchasesUpdatedListener {
         result.await()
     }
 
-    suspend fun offers(productIds: List<String>): List<PlanOffer> {
-        if (productIds.isEmpty() || !ready()) return emptyList()
-        val params = QueryProductDetailsParams.newBuilder().setProductList(productIds.map {
-            QueryProductDetailsParams.Product.newBuilder().setProductId(it).setProductType(BillingClient.ProductType.SUBS).build()
-        }).build()
+    /** One offer per base plan of [productId] (e.g. byak_pro → monthly, yearly), in the order given. */
+    suspend fun offers(productId: String, basePlanIds: List<String>): List<PlanOffer> {
+        if (!ready()) return emptyList()
+        val params = QueryProductDetailsParams.newBuilder().setProductList(listOf(
+            QueryProductDetailsParams.Product.newBuilder().setProductId(productId).setProductType(BillingClient.ProductType.SUBS).build()
+        )).build()
         val details: List<ProductDetails> = client.queryProductDetails(params).productDetailsList ?: emptyList()
-        return details.mapNotNull { product ->
-            val offers = product.subscriptionOfferDetails.orEmpty()
-            // Play only returns offers this user is eligible for: prefer a free trial, otherwise the base plan.
-            val trialOffer = offers.firstOrNull { o -> o.pricingPhases.pricingPhaseList.any { it.priceAmountMicros == 0L } }
-            val offer = trialOffer ?: offers.firstOrNull { it.offerId == null } ?: offers.firstOrNull() ?: return@mapNotNull null
+        val product = details.firstOrNull { it.productId == productId } ?: return emptyList()
+        val all = product.subscriptionOfferDetails.orEmpty()
+        return basePlanIds.mapNotNull { basePlan ->
+            val forPlan = all.filter { it.basePlanId == basePlan }
+            // Play only returns offers this user is eligible for: prefer a free trial, otherwise the base plan itself.
+            val trialOffer = forPlan.firstOrNull { o -> o.offerId != null && o.pricingPhases.pricingPhaseList.any { it.priceAmountMicros == 0L } }
+            val offer = trialOffer ?: forPlan.firstOrNull { it.offerId == null } ?: forPlan.firstOrNull() ?: return@mapNotNull null
             val phases = offer.pricingPhases.pricingPhaseList
-            val price = phases.lastOrNull()?.formattedPrice ?: return@mapNotNull null
+            val recurring = phases.lastOrNull() ?: return@mapNotNull null
             val trial = phases.firstOrNull { it.priceAmountMicros == 0L }?.let { describePeriod(it.billingPeriod) }?.let { "$it free trial" }
-            PlanOffer(product.productId, product.name, price, product, offer.offerToken, trial)
-        }.sortedBy { productIds.indexOf(it.productId) }
+            val months = when { recurring.billingPeriod.endsWith("Y") -> 12 * (recurring.billingPeriod.drop(1).dropLast(1).toIntOrNull() ?: 1); recurring.billingPeriod.endsWith("M") -> recurring.billingPeriod.drop(1).dropLast(1).toIntOrNull() ?: 1; else -> 1 }
+            PlanOffer(product.productId, basePlan, product.name, recurring.formattedPrice, product, offer.offerToken, trial, recurring.priceAmountMicros, recurring.priceCurrencyCode, months)
+        }
     }
 
     /** Opens the Play purchase sheet. The account id binds the purchase to this BYAK user server-side. */
-    fun launch(activity: Activity, offer: PlanOffer, obfuscatedAccountId: String): String? {
+    fun launch(activity: Activity, offer: PlanOffer, obfuscatedAccountId: String, replacingPurchaseToken: String? = null): String? {
         val product = BillingFlowParams.ProductDetailsParams.newBuilder().setProductDetails(offer.details).setOfferToken(offer.offerToken).build()
-        val params = BillingFlowParams.newBuilder().setProductDetailsParamsList(listOf(product))
-            .apply { if (obfuscatedAccountId.isNotBlank()) setObfuscatedAccountId(obfuscatedAccountId) }.build()
-        val result = client.launchBillingFlow(activity, params)
+        val builder = BillingFlowParams.newBuilder().setProductDetailsParamsList(listOf(product))
+        if (obfuscatedAccountId.isNotBlank()) builder.setObfuscatedAccountId(obfuscatedAccountId)
+        // Switching base plans (monthly → yearly) replaces the current subscription; unused time is credited.
+        if (replacingPurchaseToken != null) builder.setSubscriptionUpdateParams(
+            BillingFlowParams.SubscriptionUpdateParams.newBuilder().setOldPurchaseToken(replacingPurchaseToken)
+                .setSubscriptionReplacementMode(BillingFlowParams.SubscriptionUpdateParams.ReplacementMode.WITH_TIME_PRORATION).build()
+        )
+        val result = client.launchBillingFlow(activity, builder.build())
         return if (result.responseCode == BillingClient.BillingResponseCode.OK) null else result.debugMessage.ifBlank { "Google Play couldn't start the purchase (${result.responseCode})" }
     }
 

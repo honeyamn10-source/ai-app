@@ -141,9 +141,10 @@ docs/                    Architecture, security, API and release guidance
 
 ## Plans
 
-| | Free | Pro (monthly ≈ $1 / annual ≈ $10) |
+| | Free | Pro ($1 / month or $10 / year) |
 |---|---|---|
 | Live web search in chat | 10 per day | 200 per day |
+| Compare two models side by side | 2 per day | 100 per day |
 | Photo questions (vision) | 12 images per day | 500 per day |
 | Conversation memory sent to the model | last 20 messages | last 100 messages |
 | Document excerpts per answer | 4 | 10 |
@@ -154,7 +155,7 @@ docs/                    Architecture, security, API and release guidance
 | Research searches per day | 50 | 1,000 |
 | Provider connections | 3 | 50 |
 
-Limits are enforced by the API, not the app. Daily allowances reset at midnight UTC. To offer a free trial, add a free-trial offer to each subscription's base plan in Play Console; the app picks it up automatically for eligible users.
+Limits are enforced by the API, not the app. Daily allowances reset at midnight UTC. Play Console setup: one subscription `byak_pro` with base plans `monthly` and `yearly`; add a free-trial offer to each base plan and the app shows it automatically to eligible users. Yearly shows its live saving versus monthly (about 17% at $10 vs $1).
 
 Limits live in `backend/src/billing.mjs`. Prices are set per country in Play Console.
 

@@ -1,5 +1,5 @@
 openapi: 3.1.0
-info: { title: BYAK AI API, version: 0.3.0 }
+info: { title: BYAK AI API, version: 0.4.0 }
 servers: [{ url: https://api.example.com }]
 security: [{ bearerAuth: [] }]
 components:
@@ -81,6 +81,7 @@ paths:
   /v1/research: { post: { responses: { '200': { description: Source-attributed results }, '402': { $ref: '#/components/responses/PlanLimit' } } } }
   /v1/tools/url-reader: { post: { description: Fetch a public HTTPS page as text (private networks blocked), responses: { '200': { description: Page text } } } }
 
+  /v1/compare: { post: { description: 'Body: content, targets (exactly two {providerId, model}). Both answers are returned together; one failing provider does not fail the other.', responses: { '200': { description: Two results }, '402': { $ref: '#/components/responses/PlanLimit' } } } }
   /v1/prompts:
     get: { responses: { '200': { description: Saved prompts and built-in templates } } }
     post: { responses: { '201': { description: Prompt saved } } }

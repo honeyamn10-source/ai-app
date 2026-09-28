@@ -10,7 +10,7 @@ import { builtInPrompts } from './prompts.mjs';
 import { githubSearch, readUrl, redditSearch, webSearch } from './research.mjs';
 import { createBilling, plans, proHighlights } from './billing.mjs';
 
-const VERSION = '0.3.0';
+const VERSION = '0.4.0';
 export const store = await new Store().init();
 export const billing = createBilling({ store });
 const attempts = new Map();

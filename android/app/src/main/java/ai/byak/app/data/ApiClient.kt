@@ -201,6 +201,14 @@ class ApiClient(private val settings: SettingsStore, private val sessions: Sessi
     }
     suspend fun deleteFile(id: String) { request("/v1/files/${id.enc()}", "DELETE") }
 
+    // ---------- compare ----------
+    suspend fun compare(content: String, targets: List<Pair<String, String>>): List<ComparisonResult> {
+        val body = JSONObject().put("content", content).put("targets", JSONArray(targets.map { (providerId, model) -> JSONObject().put("providerId", providerId).put("model", model) }))
+        return request("/v1/compare", "POST", body).getJSONArray("results").objects().map {
+            ComparisonResult(it.optString("providerName"), it.optString("model"), it.optString("content"), it.nullableString("error"), it.optLong("ms"), it.optJSONObject("usage")?.optLong("outputTokens") ?: 0)
+        }
+    }
+
     // ---------- prompt library ----------
     suspend fun prompts(): Pair<List<SavedPrompt>, List<SavedPrompt>> {
         val data = request("/v1/prompts")
@@ -245,5 +253,5 @@ internal fun JSONObject.toSubscription(): Subscription {
     val usage = optJSONObject("usageToday")
     val highlights = optJSONArray("highlights")?.objects().orEmpty().map { ProHighlight(it.optString("key"), it.optString("title"), it.optString("free"), it.optString("pro")) }
     return Subscription(optString("plan", "free"), optString("tier", "free"), optString("status", "active"), nullableString("expiresAt"), optBoolean("autoRenewing"), nullableString("productId"), optString("billingAccountId"), optBoolean("verificationAvailable"), limits,
-        usage?.optInt("webSearches") ?: 0, usage?.optInt("images") ?: 0, highlights)
+        usage?.optInt("webSearches") ?: 0, usage?.optInt("images") ?: 0, highlights, nullableString("basePlanId"), usage?.optInt("comparisons") ?: 0)
 }

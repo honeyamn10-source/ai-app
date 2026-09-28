@@ -1,6 +1,7 @@
 package ai.byak.app
 
 import ai.byak.app.billing.describePeriod
+import ai.byak.app.billing.savingsPercent
 import ai.byak.app.data.SavedPrompt
 import ai.byak.app.data.Subscription
 import ai.byak.app.data.SettingsStore
@@ -50,5 +51,10 @@ class FeaturesTest {
     @Test fun dailyAllowancesNeverGoNegative() {
         val sub = Subscription.FREE.copy(limits = mapOf("webSearchesPerDay" to 3, "imagesPerDay" to 5), webSearchesToday = 4, imagesToday = 2)
         assertEquals(0, sub.webSearchesLeft); assertEquals(3, sub.imagesLeft)
+    }
+
+    @Test fun yearlySavingsAreRounded() {
+        assertEquals(17, savingsPercent(monthlyMicros = 1_000_000, yearlyMicros = 10_000_000)) // $1/mo vs $10/yr
+        assertNull(savingsPercent(1_000_000, 12_000_000)); assertNull(savingsPercent(0, 10_000_000))
     }
 }
