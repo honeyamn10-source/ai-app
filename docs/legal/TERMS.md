@@ -7,9 +7,6 @@
 **Contact:** [byakai@yahoo.com](mailto:byakai@yahoo.com)
 **Address for formal notices:** 55 Pioneer Lane, Vaughan, Ontario L4L 2J2, Canada
 
-> **Before publishing:** have a qualified lawyer review this document for the launch
-> jurisdictions. Terms of Service are a contract, not a description.
-
 ---
 
 ## 1. Agreement
@@ -99,8 +96,14 @@ through Google Play.
 
 You keep all rights in the content you create in the Service. You grant us only the narrow
 licence needed to operate the Service for you — for example, to host a support message you sent
-us, or to display your content back to you. Because BYAK AI is a client, your conversations stay
-on your device and are not hosted by us.
+us, or to display your content back to you.
+
+In **on-device mode** your conversations are not hosted by us at all; they stay on your phone. In
+**server mode**, if you sign in to a BYAK server account, your conversations, attachments and
+provider keys are stored on that server instead, and **the operator of that server holds them** —
+which may be BYAK or a third party. Section 4.2 of the Privacy Policy sets out exactly what that
+server receives, and if the server is not ours, its own privacy policy and terms apply to it
+instead of these.
 
 You are responsible for having the rights and permissions necessary for what you create, and for
 making sure your use does not infringe anyone else's rights. We do not claim ownership of your
