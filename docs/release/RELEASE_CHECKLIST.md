@@ -204,7 +204,7 @@ retained for 90 days as the `BYAK-AI-release-aab` workflow artifact.
 
 ## 8. Test pass on the Play-installed build
 
-- [ ] Get started without creating an account
+- [ ] First launch opens straight into the app — no sign-in or sign-up screen
 - [ ] Add a key for each supported provider
 - [ ] Start, stop, regenerate, edit, copy and share a chat
 - [ ] Photos and files

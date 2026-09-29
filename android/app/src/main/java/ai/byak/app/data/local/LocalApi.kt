@@ -70,6 +70,12 @@ class LocalApi(
         return profile to subscription()
     }
     suspend fun setIdentity(name: String, email: String) = store.write { db -> db.meta.put("name", name).put("email", email) }
+    /** Opens BYAK on this phone with no sign-in or sign-up, keeping any name the user already chose. */
+    suspend fun startSession() {
+        val (name, email) = store.read { db -> db.meta.optString("name").ifBlank { "You" } to db.meta.optString("email") }
+        setIdentity(name, email)
+        sessions.save(Session(SessionStore.ON_DEVICE, SessionStore.ON_DEVICE, name, email))
+    }
     override suspend fun updateProfile(name: String, customInstructions: String) {
         val email = store.write { db -> db.meta.put("name", name).put("customInstructions", customInstructions); db.meta.optString("email") }
         sessions.updateProfile(name, email) // keeps the Home greeting and drawer in sync

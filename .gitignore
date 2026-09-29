@@ -14,3 +14,7 @@ android/**/build/
 # Generated legal pages. Built by scripts/build-legal-pages.py once the
 # [[...]] operator placeholders in docs/legal are filled in.
 site/legal/
+
+# Python bytecode
+__pycache__/
+*.pyc

@@ -5,6 +5,8 @@ package ai.byak.app.ui
 import android.content.Intent
 import android.net.Uri
 import ai.byak.app.BuildConfig
+import ai.byak.app.ByakApplication
+import ai.byak.app.auth.GoogleSignIn
 import ai.byak.app.billing.PlanOffer
 import ai.byak.app.billing.perMonth
 import ai.byak.app.billing.yearlySavingsPercent
@@ -44,10 +46,11 @@ private val playBasePlans get() = listOf(BuildConfig.PLAY_YEARLY_BASE_PLAN, Buil
 @Composable fun SettingsScreen(session: Session, state: UiState, vm: ByakViewModel, settings: SettingsStore, navigate: (Destination) -> Unit) {
     val context = LocalContext.current; val scope = rememberCoroutineScope()
     val server by settings.serverUrl.collectAsState(initial = ""); val themeMode by settings.themeMode.collectAsState(initial = ThemeMode.System); val dynamic by settings.dynamicColor.collectAsState(initial = false)
-    var editingServer by remember { mutableStateOf(false) }; var appearance by remember { mutableStateOf(false) }
+    var editingServer by remember { mutableStateOf(false) }; var serverSignIn by remember { mutableStateOf(false) }; var appearance by remember { mutableStateOf(false) }
     var editingSearchKey by remember { mutableStateOf(false) }; var aboutLocal by remember { mutableStateOf(false) }
     var hasSearchKey by remember { mutableStateOf(false) }; var legal by remember { mutableStateOf(false) }
     LaunchedEffect(editingSearchKey) { if (!editingSearchKey) hasSearchKey = vm.hasWebSearchKey() }
+    LaunchedEffect(vm.isLocal) { serverSignIn = false } // a successful server sign-in closes the dialog
     var deleting by remember { mutableStateOf(false) }; var editingProfile by remember { mutableStateOf(false) }; var changingPassword by remember { mutableStateOf(false) }
     val exporter = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
         uri ?: return@rememberLauncherForActivityResult
@@ -60,7 +63,7 @@ private val playBasePlans get() = listOf(BuildConfig.PLAY_YEARLY_BASE_PLAN, Buil
     val sub = state.subscription
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(20.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         item { Text("Settings", fontSize = 25.sp, fontWeight = FontWeight.Black) }
-        item { Card(Modifier.fillMaxWidth().clickable { editingProfile = true }) { ListItem(headlineContent = { Text(state.profile?.name ?: session.name, fontWeight = FontWeight.Bold) }, supportingContent = { Text(state.profile?.email ?: session.email) }, leadingContent = { Icon(Icons.Outlined.AccountCircle, null) }, trailingContent = { Icon(Icons.Outlined.Edit, "Edit profile") }) } }
+        item { Card(Modifier.fillMaxWidth().clickable { editingProfile = true }) { ListItem(headlineContent = { Text(state.profile?.name ?: session.name, fontWeight = FontWeight.Bold) }, supportingContent = { Text((state.profile?.email ?: session.email).ifBlank { "On this phone · no account needed" }) }, leadingContent = { Icon(Icons.Outlined.AccountCircle, null) }, trailingContent = { Icon(Icons.Outlined.Edit, "Edit profile") }) } }
         item { SettingsRow(Icons.Outlined.WorkspacePremium, if (sub.isPro) "BYAK Pro (${sub.plan})" else "Free plan", if (sub.isPro) sub.expiresAt?.let { "${if (sub.autoRenewing) "Renews" else "Ends"} ${it.take(10)}" } ?: "Active" else "Upgrade from $1/month") { navigate(Destination.Plan) } }
         item { SettingsRow(Icons.Outlined.Hub, "AI providers", "${state.providers.size} encrypted connection(s)") { navigate(Destination.Models) } }
         item { SettingsRow(Icons.Outlined.Workspaces, "Projects", "${state.projects.size} project(s)") { navigate(Destination.Projects) } }
@@ -73,12 +76,16 @@ private val playBasePlans get() = listOf(BuildConfig.PLAY_YEARLY_BASE_PLAN, Buil
         if (vm.isLocal) {
             item { SettingsRow(Icons.Outlined.Language, "Web search key (optional)", if (hasSearchKey) "Brave Search key saved · better web results" else "Uses Wikipedia now · add a free Brave key for full web search") { editingSearchKey = true } }
             item { SettingsRow(Icons.Outlined.PhoneAndroid, "Where your data lives", "On this phone only · keys encrypted with the Android Keystore") { aboutLocal = true } }
+            if (GoogleSignIn.configured) item { SettingsRow(Icons.Outlined.AccountCircle, "Google account (optional)", session.email.ifBlank { "Not needed · adds your name and email to this profile" }) {
+                scope.launch { runCatching { linkGoogleOnDevice(context.applicationContext as ByakApplication, context) }.onFailure { vm.reportError(it.message ?: "Google Sign-In failed") } }
+            } }
+            item { SettingsRow(Icons.Outlined.Dns, "BYAK server (advanced)", "Only if you run your own BYAK server") { serverSignIn = true } }
         } else item { SettingsRow(Icons.Outlined.Dns, "Server", server.removePrefix("https://").removePrefix("http://")) { editingServer = true } }
         item { SettingsRow(Icons.Outlined.Download, "Export my data", "Chats, projects, files and memory as JSON") { exporter.launch("byak-export.json") } }
         item { SettingsRow(Icons.Outlined.Policy, "Privacy policy & terms", "How BYAK handles your data") { legal = true } }
         if (BuildConfig.SUPPORT_EMAIL.isNotBlank()) item { SettingsRow(Icons.Outlined.SupportAgent, "Help & feedback", BuildConfig.SUPPORT_EMAIL) { runCatching { context.startActivity(Intent(Intent.ACTION_SENDTO, Uri.parse("mailto:${BuildConfig.SUPPORT_EMAIL}")).putExtra(Intent.EXTRA_SUBJECT, "BYAK AI ${BuildConfig.VERSION_NAME} feedback")) } } }
-        item { OutlinedButton(onClick = { vm.logout() }, Modifier.fillMaxWidth()) { Icon(Icons.AutoMirrored.Outlined.Logout, null); Text(" Sign out") } }
-        item { TextButton(onClick = { deleting = true }, Modifier.fillMaxWidth(), colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error)) { Text("Delete account and data") } }
+        if (!vm.isLocal) item { OutlinedButton(onClick = { vm.logout() }, Modifier.fillMaxWidth()) { Icon(Icons.AutoMirrored.Outlined.Logout, null); Text(" Sign out of server") } }
+        item { TextButton(onClick = { deleting = true }, Modifier.fillMaxWidth(), colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error)) { Text(if (vm.isLocal) "Erase all data on this phone" else "Delete account and data") } }
         item { Text("BYAK AI ${BuildConfig.VERSION_NAME}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.fillMaxWidth().padding(top = 8.dp)) }
     }
     if (deleting) ConfirmDialog(if (vm.isLocal) "Erase all BYAK data on this phone?" else "Delete your account?", "This permanently removes provider keys, chats, files, projects and memory." + if (sub.isPro) " Also cancel your subscription in Google Play to stop renewals." else "", "Delete permanently", onDismiss = { deleting = false }) { deleting = false; vm.deleteAccount() }
@@ -88,6 +95,7 @@ private val playBasePlans get() = listOf(BuildConfig.PLAY_YEARLY_BASE_PLAN, Buil
     if (aboutLocal) AlertDialog(onDismissRequest = { aboutLocal = false }, confirmButton = { Button(onClick = { aboutLocal = false }) { Text("OK") } }, title = { Text("BYAK runs on your phone") },
         text = { Text("Your chats, files, projects and memory are stored only in this app's private storage. API keys are encrypted with a hardware-backed Android Keystore key and sent only to the AI provider you chose. Uninstalling the app or \"Erase all data\" deletes everything — use Export my data to keep a copy.") })
     if (editingServer) ServerDialog(server, settings, onDismiss = { editingServer = false }) { changed -> editingServer = false; if (changed) vm.logout() }
+    if (serverSignIn) ServerSignInDialog(context.applicationContext as ByakApplication, onDismiss = { serverSignIn = false })
     if (appearance) AppearanceDialog(themeMode, dynamic, onDismiss = { appearance = false }) { mode, dyn -> scope.launch { settings.setThemeMode(mode); settings.setDynamicColor(dyn) }; appearance = false }
     if (changingPassword) PasswordDialog(onDismiss = { changingPassword = false }) { current, new -> vm.changePassword(current, new) { changingPassword = false } }
 }
