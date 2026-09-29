@@ -14,8 +14,8 @@ android {
         // Play already holds versionCode 34 (3.0.1) from the release/byak-v3.0.1-* line.
         // Google Play rejects a reused or lower versionCode, so this line continues at 35.
         // Raise this after every successful upload.
-        versionCode = 35
-        versionName = "3.1.0"
+        versionCode = 36
+        versionName = "3.1.1"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         fun prop(name: String, fallback: String) = (project.findProperty(name) as String?)?.takeIf { it.isNotBlank() } ?: System.getenv(name)?.takeIf { it.isNotBlank() } ?: fallback
         buildConfigField("String", "API_BASE_URL", "\"${prop("BYAK_API_URL", "http://10.0.2.2:8787")}\"")

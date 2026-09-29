@@ -9,6 +9,7 @@ import ai.byak.app.ByakApplication
 import ai.byak.app.data.Session
 import ai.byak.app.data.SessionStore
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -26,6 +27,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 
 enum class Destination(val title: String, val icon: ImageVector) {
@@ -41,7 +43,27 @@ fun Context.findActivity(): Activity? = when (this) { is Activity -> this; is Co
 @Composable fun ByakApp(app: ByakApplication) {
     val session by app.sessionStore.session.collectAsState(initial = null)
     val current = session
-    if (current == null) AuthScreen(app) else MainShell(app, current)
+    if (current == null) StartOnDevice(app) else MainShell(app, current)
+}
+
+/** No sign-in or sign-up: first launch, sign-out and "erase all data" all land straight back in the app. */
+@Composable private fun StartOnDevice(app: ByakApplication) {
+    var error by remember { mutableStateOf<String?>(null) }
+    var attempt by remember { mutableIntStateOf(0) }
+    LaunchedEffect(attempt) {
+        error = null
+        try { if (app.sessionStore.current() == null) app.local.startSession() }
+        catch (e: CancellationException) { throw e }
+        catch (e: Exception) { error = e.message ?: "BYAK couldn't open its storage on this phone" }
+    }
+    Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).padding(24.dp), contentAlignment = Alignment.Center) {
+        val message = error
+        if (message == null) CircularProgressIndicator()
+        else Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Text(message, color = MaterialTheme.colorScheme.error)
+            Button(onClick = { attempt++ }) { Text("Try again") }
+        }
+    }
 }
 
 @Composable private fun MainShell(app: ByakApplication, session: Session) {
