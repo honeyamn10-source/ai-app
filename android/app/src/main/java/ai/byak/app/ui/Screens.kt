@@ -9,6 +9,9 @@ import android.provider.OpenableColumns
 import ai.byak.app.data.Project
 import ai.byak.app.data.Provider
 import ai.byak.app.data.Session
+import ai.byak.app.data.local.Catalog
+import ai.byak.app.data.local.LocalModel
+import ai.byak.app.data.local.LocalModelState
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
@@ -33,6 +36,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -209,7 +213,8 @@ fun formatBytes(bytes: Long): String = when { bytes < 1024 -> "$bytes B"; bytes 
                 Button(onClick = { adding = true }) { Icon(Icons.Outlined.Add, null); Text(" Connect") }
             }
         }
-        if (state.providers.isEmpty()) item { EmptyState(Icons.Outlined.Key, "Bring your API key", "OpenAI, Claude, Gemini, OpenRouter, Groq, Mistral, DeepSeek or any OpenAI-compatible HTTPS endpoint.") }
+        if (vm.offlineAvailable) item { OfflineAiCard(state, vm) }
+        if (state.providers.isEmpty()) item { EmptyState(Icons.Outlined.Key, "Bring your API key", "OpenAI, Claude, Gemini, OpenRouter, Groq, Mistral, DeepSeek, NVIDIA or any OpenAI-compatible HTTPS endpoint. Or use the free Offline AI above — no key needed.") }
         items(state.providers, key = { it.id }) { p ->
             Card {
                 Column(Modifier.padding(16.dp)) {
@@ -228,11 +233,44 @@ fun formatBytes(bytes: Long): String = when { bytes < 1024 -> "$bytes B"; bytes 
                 }
             }
         }
-        item { Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer)) { ListItem(headlineContent = { Text("Local AI", fontWeight = FontWeight.Bold) }, supportingContent = { Text("Ollama works on self-hosted servers. On-device models are coming soon.") }, leadingContent = { Icon(Icons.Outlined.Laptop, null) }) } }
     }
-    if (adding) ProviderDialog(state, onDismiss = { adding = false }) { type, key, model, base -> vm.addProvider(type, key, model, base) { adding = false } }
-    removing?.let { p -> ConfirmDialog("Remove ${p.name}?", "The encrypted key is deleted from the server. Chats using it will ask you to pick another model.", "Remove", onDismiss = { removing = null }) { vm.removeProvider(p.id); removing = null } }
+    if (adding) ProviderDialog(state, onDismiss = { adding = false; vm.clearProviderError() }) { type, key, model, base -> vm.addProvider(type, key, model, base) { adding = false } }
+    removing?.let { p -> ConfirmDialog("Remove ${p.name}?", if (p.provider == Catalog.LOCAL) "Chats using offline AI will ask you to pick another model. The downloaded model stays until you delete it on the Offline AI card." else "The encrypted key is deleted from this phone. Chats using it will ask you to pick another model.", "Remove", onDismiss = { removing = null }) { vm.removeProvider(p.id); removing = null } }
     choosing?.let { p -> DefaultModelDialog(p, state, vm, onDismiss = { choosing = null }) { vm.setDefaultModel(p.id, it); choosing = null } }
+}
+
+/** Download, use or delete the offline model (Qwen3 0.6B). Polls while a download runs. */
+@Composable private fun OfflineAiCard(state: UiState, vm: ByakViewModel) {
+    val model = state.localModel
+    val downloading = model?.status == LocalModelState.Status.Downloading
+    LaunchedEffect(downloading) { while (true) { vm.refreshLocalModel(); delay(if (downloading) 1_000 else 4_000) } }
+    var confirmDelete by remember { mutableStateOf(false) }
+    val connected = state.providers.any { it.provider == Catalog.LOCAL && it.enabled }
+    Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer)) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Outlined.PhoneAndroid, null, tint = MaterialTheme.colorScheme.primary); Spacer(Modifier.width(12.dp))
+                Column(Modifier.weight(1f)) { Text("Offline AI · Qwen3 0.6B", fontWeight = FontWeight.Bold); Text("Free · private · works without internet or an API key", style = MaterialTheme.typography.bodySmall) }
+            }
+            Text(model?.message ?: "Checking…", style = MaterialTheme.typography.bodySmall)
+            if (downloading) LinearProgressIndicator(progress = { (model?.progress ?: 0) / 100f }, modifier = Modifier.fillMaxWidth())
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                when (model?.status) {
+                    LocalModelState.Status.Ready -> {
+                        if (connected) AssistChip(onClick = {}, label = { Text("Connected") }, leadingIcon = { Icon(Icons.Outlined.CheckCircle, null, Modifier.size(16.dp)) })
+                        else Button(onClick = { vm.useLocalModel() }) { Text("Use offline AI") }
+                        TextButton(onClick = { confirmDelete = true }) { Text("Delete") }
+                    }
+                    LocalModelState.Status.Downloading -> TextButton(onClick = { confirmDelete = true }) { Text("Cancel download") }
+                    LocalModelState.Status.Failed -> { Button(onClick = { vm.downloadLocalModel() }, enabled = !state.busy) { Text("Try again") }; TextButton(onClick = { confirmDelete = true }) { Text("Delete") } }
+                    LocalModelState.Status.Missing -> Button(onClick = { vm.downloadLocalModel() }, enabled = !state.busy) { Icon(Icons.Outlined.Download, null); Text(" Download (${LocalModel.SIZE_LABEL})") }
+                    null -> Unit
+                }
+            }
+            Text("Small and fast, good for everyday questions. For harder tasks and photos, add an API key below.", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+    }
+    if (confirmDelete) ConfirmDialog("Delete offline AI?", "Frees about ${LocalModel.SIZE_LABEL}. You can download it again anytime.", "Delete", onDismiss = { confirmDelete = false }) { confirmDelete = false; vm.deleteLocalModel() }
 }
 
 @Composable private fun DefaultModelDialog(provider: Provider, state: UiState, vm: ByakViewModel, onDismiss: () -> Unit, onPick: (String) -> Unit) {
@@ -257,17 +295,21 @@ fun formatBytes(bytes: Long): String = when { bytes < 1024 -> "$bytes B"; bytes 
     var model by remember { mutableStateOf(catalog.firstOrNull()?.models?.firstOrNull().orEmpty()) }
     val suggestions = catalog.firstOrNull { it.id == type }?.models.orEmpty()
     AlertDialog(onDismissRequest = onDismiss, title = { Text("Connect provider") },
-        confirmButton = { Button(onClick = { save(type, key, model, base) }, enabled = key.isNotBlank() && model.isNotBlank() && (type != "custom" || base.startsWith("https://"))) { Text("Save securely") } },
+        confirmButton = { Button(onClick = { save(type, key, model, base) }, enabled = !state.busy && key.isNotBlank() && model.isNotBlank() && (type != "custom" || base.startsWith("https://"))) { if (state.busy) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp) else Text("Test & save") } },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Text("Provider", style = MaterialTheme.typography.labelMedium)
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) { types.forEach { id -> FilterChip(selected = type == id, onClick = { type = id; model = catalog.firstOrNull { it.id == id }?.models?.firstOrNull().orEmpty() }, label = { Text(catalog.firstOrNull { it.id == id }?.name ?: "Custom") }) } }
-                OutlinedTextField(key, { key = it }, label = { Text("API key") }, singleLine = true, visualTransformation = PasswordVisualTransformation())
+                OutlinedTextField(key, { value -> key = value
+                    // Pasting a key picks the matching provider, so a Gemini key is never sent to OpenAI.
+                    Catalog.detect(value)?.takeIf { it != type && it in types && !(it == "openai" && type in setOf("openrouter", "deepseek")) }?.let { guess -> type = guess; model = catalog.firstOrNull { it.id == guess }?.models?.firstOrNull().orEmpty() }
+                }, label = { Text("API key") }, singleLine = true, visualTransformation = PasswordVisualTransformation())
+                state.providerError?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
                 OutlinedTextField(model, { model = it }, label = { Text("Default model") }, singleLine = true)
                 if (suggestions.isNotEmpty()) FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) { suggestions.forEach { s -> SuggestionChip(onClick = { model = s }, label = { Text(s) }) } }
                 if (type == "custom") OutlinedTextField(base, { base = it }, label = { Text("HTTPS endpoint (OpenAI-compatible)") }, singleLine = true, placeholder = { Text("https://example.com/v1") })
-                Text("The full key can't be viewed again after saving. You can pick any model the provider offers later.", style = MaterialTheme.typography.bodySmall)
+                Text("The key is tested before it's saved, then encrypted on this phone. You can pick any model the provider offers later.", style = MaterialTheme.typography.bodySmall)
             }
         })
 }

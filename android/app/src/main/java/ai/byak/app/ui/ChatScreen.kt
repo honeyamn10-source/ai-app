@@ -198,6 +198,7 @@ import kotlinx.coroutines.launch
 
 @Composable private fun MessageBubble(message: ChatMessage, vm: ByakViewModel, speaker: Speaker, canRegenerate: Boolean, canEdit: Boolean, status: String?) {
     val user = message.role == "user"; val clipboard = LocalClipboardManager.current; val context = LocalContext.current
+    if (message.status == "failed") { FailedBubble(message, vm); return }
     var reporting by remember { mutableStateOf(false) }
     if (reporting) ReportDialog(message, onDismiss = { reporting = false })
     Row(Modifier.fillMaxWidth(), horizontalArrangement = if (user) Arrangement.End else Arrangement.Start) {
@@ -243,6 +244,19 @@ import kotlinx.coroutines.launch
                 if (user && canEdit) Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                     IconButton(onClick = { vm.startEdit(message) }, Modifier.size(32.dp)) { Icon(Icons.Outlined.Edit, "Edit message", Modifier.size(16.dp)) }
                 }
+            }
+        }
+    }
+}
+
+/** Shown when an answer couldn't be produced: the reason stays on screen with a Retry button. */
+@Composable private fun FailedBubble(message: ChatMessage, vm: ByakViewModel) {
+    Surface(color = MaterialTheme.colorScheme.errorContainer, contentColor = MaterialTheme.colorScheme.onErrorContainer, shape = RoundedCornerShape(20.dp), modifier = Modifier.widthIn(max = 680.dp)) {
+        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) { Icon(Icons.Outlined.ErrorOutline, null, Modifier.size(18.dp)); Spacer(Modifier.width(6.dp)); Text("No answer", fontWeight = FontWeight.Bold) }
+            Text(message.content)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(onClick = vm::regenerate) { Icon(Icons.Outlined.Replay, null, Modifier.size(16.dp)); Text(" Retry") }
             }
         }
     }

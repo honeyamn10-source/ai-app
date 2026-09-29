@@ -24,15 +24,23 @@ object Catalog {
     data class Entry(val id: String, val name: String, val baseUrl: String, val kind: String, val models: List<String>, val usageOption: Boolean = false)
     val entries = listOf(
         Entry("openai", "OpenAI", "https://api.openai.com/v1", "openai", listOf("gpt-4.1-mini", "gpt-4.1", "o4-mini"), usageOption = true),
-        Entry("anthropic", "Anthropic", "https://api.anthropic.com/v1", "anthropic", listOf("claude-opus-5", "claude-sonnet-5", "claude-haiku-4-5")),
+        Entry("anthropic", "Anthropic Claude", "https://api.anthropic.com/v1", "anthropic", listOf("claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-4-5")),
         Entry("gemini", "Google Gemini", "https://generativelanguage.googleapis.com/v1beta", "gemini", listOf("gemini-2.5-flash", "gemini-2.5-pro")),
         Entry("openrouter", "OpenRouter", "https://openrouter.ai/api/v1", "openai", listOf("openai/gpt-4.1-mini", "google/gemini-2.5-flash", "anthropic/claude-sonnet-5"), usageOption = true),
         Entry("groq", "Groq", "https://api.groq.com/openai/v1", "openai", listOf("llama-3.3-70b-versatile"), usageOption = true),
         Entry("mistral", "Mistral", "https://api.mistral.ai/v1", "openai", listOf("mistral-small-latest", "mistral-large-latest")),
-        Entry("deepseek", "DeepSeek", "https://api.deepseek.com/v1", "openai", listOf("deepseek-chat", "deepseek-reasoner"), usageOption = true)
+        Entry("deepseek", "DeepSeek", "https://api.deepseek.com/v1", "openai", listOf("deepseek-chat", "deepseek-reasoner"), usageOption = true),
+        Entry("nvidia", "NVIDIA", "https://integrate.api.nvidia.com/v1", "openai", listOf("meta/llama-3.3-70b-instruct", "deepseek-ai/deepseek-r1")),
+        Entry(LOCAL, "Offline AI (Qwen3 0.6B)", "", "local", listOf(LocalModel.MODEL_ID))
     )
+    const val LOCAL = "local"
     fun entry(id: String): Entry? = entries.firstOrNull { it.id == id }
-    fun asCatalog(): List<CatalogProvider> = entries.map { CatalogProvider(it.id, it.name, it.models, localOnly = false, keyOptional = false) }
+    /** Guesses the provider from a pasted key's prefix, so a Gemini key never gets sent to OpenAI. */
+    fun detect(key: String): String? = key.trim().let { k -> when {
+        k.startsWith("sk-ant-") -> "anthropic"; k.startsWith("AIza") -> "gemini"; k.startsWith("sk-or-") -> "openrouter"
+        k.startsWith("gsk_") -> "groq"; k.startsWith("nvapi-") -> "nvidia"; k.startsWith("sk-proj-") || k.startsWith("sk-svcacct-") -> "openai"
+        else -> null } }
+    fun asCatalog(): List<CatalogProvider> = entries.map { CatalogProvider(it.id, it.name, it.models, localOnly = it.kind == "local", keyOptional = it.kind == "local") }
 }
 
 data class Connection(val provider: String, val name: String, val baseUrl: String, val apiKey: String)
@@ -41,7 +49,7 @@ data class Completion(val text: String, val inputTokens: Long, val outputTokens:
 
 /** Calls AI providers directly from the phone with the user's own key. */
 // Reasoning models can think silently for a while before the first token, so the idle read timeout is generous.
-class Gateway(private val client: OkHttpClient = OkHttpClient.Builder().connectTimeout(20, TimeUnit.SECONDS).readTimeout(180, TimeUnit.SECONDS).build()) {
+class Gateway(private val localModel: LocalModel? = null, private val client: OkHttpClient = OkHttpClient.Builder().connectTimeout(20, TimeUnit.SECONDS).readTimeout(180, TimeUnit.SECONDS).build()) {
     private val json = "application/json; charset=utf-8".toMediaType()
     private val quick = client.newBuilder().readTimeout(20, TimeUnit.SECONDS).build()
 
@@ -67,6 +75,7 @@ class Gateway(private val client: OkHttpClient = OkHttpClient.Builder().connectT
     }
 
     suspend fun listModels(c: Connection): List<String> = withContext(Dispatchers.IO) {
+        if (kind(c) == "local") return@withContext listOf(LocalModel.MODEL_ID)
         val path = if (kind(c) == "gemini") "/models?pageSize=200" else "/models"
         execute(quick, Request.Builder().url(base(c) + path).auth(c).get().build()).use { res ->
             if (!res.isSuccessful) throw failure(c.name, res)
@@ -79,6 +88,7 @@ class Gateway(private val client: OkHttpClient = OkHttpClient.Builder().connectT
     /** Streams one answer; [onDelta] receives text as it arrives. Cancelling the coroutine cancels the HTTP call. */
     suspend fun stream(c: Connection, model: String, system: String, turns: List<Turn>, onDelta: (String) -> Unit): Completion = withContext(Dispatchers.IO) {
         if (model.isBlank()) throw ApiException("Choose a model for this provider", 400)
+        if (kind(c) == "local") return@withContext (localModel ?: throw ApiException("Offline AI isn't available", 500)).generate(system, turns, onDelta).also { if (it.text.isBlank()) throw ApiException("The offline AI gave an empty answer. Try asking again in different words.", 502) }
         val merged = merge(turns)
         val (url, body) = when (kind(c)) {
             "anthropic" -> "${base(c)}/messages" to JSONObject().put("model", model).put("max_tokens", 16000).put("stream", true).apply { if (system.isNotBlank()) put("system", system) }
@@ -97,9 +107,11 @@ class Gateway(private val client: OkHttpClient = OkHttpClient.Builder().connectT
         try { execute(client, request).use { res ->
             if (!res.isSuccessful) throw failure(c.name, res)
             val source = res.body?.source() ?: return@use
+            val other = StringBuilder(); var events = 0
             while (true) {
                 val line = source.readUtf8Line() ?: break
-                if (!line.startsWith("data:")) continue
+                if (!line.startsWith("data:")) { if (events == 0 && other.length < 200_000) other.append(line).append('\n'); continue }
+                events++
                 val raw = line.removePrefix("data:").trim(); if (raw == "[DONE]") break
                 val event = runCatching { JSONObject(raw) }.getOrNull() ?: continue
                 when (kind(c)) {
@@ -125,11 +137,27 @@ class Gateway(private val client: OkHttpClient = OkHttpClient.Builder().connectT
                     }
                 }
             }
+            // Some OpenAI-compatible servers ignore "stream": true and send one JSON answer instead.
+            if (events == 0 && text.isEmpty()) runCatching { JSONObject(other.toString()) }.getOrNull()?.let { whole ->
+                whole.optJSONObject("error")?.let { throw ApiException("${c.name}: ${it.optString("message")}", 502) }
+                val parsed = when (kind(c)) {
+                    "anthropic" -> whole.optJSONArray("content").objects().filter { it.optString("type") == "text" }.joinToString("") { it.optString("text") }
+                    "gemini" -> whole.optJSONArray("candidates")?.optJSONObject(0)?.optJSONObject("content")?.optJSONArray("parts").objects().filterNot { it.optBoolean("thought") }.joinToString("") { it.optString("text") }
+                    else -> whole.optJSONArray("choices")?.optJSONObject(0)?.optJSONObject("message")?.optString("content")?.takeIf { it != "null" }.orEmpty()
+                }
+                emit(parsed)
+            }
         } } catch (e: IOException) {
             currentCoroutineContext().ensureActive() // a user stop surfaces as cancellation, not as an error
             throw ApiException(if (e is java.net.SocketTimeoutException) "${c.name} stopped responding. Try again." else "The connection to ${c.name} was interrupted. Try again.", 0)
         }
         if (stop == "refusal" && text.isEmpty()) emit("The model declined to answer this request.")
+        // Never finish silently: an empty answer is reported, with the likely reason.
+        if (text.isBlank()) throw ApiException(when (stop) {
+            "max_tokens", "length", "MAX_TOKENS" -> "$model used its whole output limit before answering. Try a shorter question or another model."
+            "SAFETY", "content_filter", "PROHIBITED_CONTENT" -> "${c.name} blocked this answer (safety filter). Try rephrasing."
+            else -> "${c.name} returned an empty answer with $model. Check the model name in Models, or try another model."
+        }, 502)
         Completion(text, input, output, stop)
     }
 

@@ -5,7 +5,10 @@ import ai.byak.app.billing.BillingManager
 import ai.byak.app.billing.PlanOffer
 import ai.byak.app.billing.PurchaseOutcome
 import ai.byak.app.data.*
+import ai.byak.app.data.local.Catalog
 import ai.byak.app.data.local.LocalApi
+import ai.byak.app.data.local.LocalModel
+import ai.byak.app.data.local.LocalModelState
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.CancellationException
@@ -29,10 +32,12 @@ data class UiState(
     // prompt library
     val prompts: List<SavedPrompt> = emptyList(), val templates: List<SavedPrompt> = emptyList(),
     // compare
-    val comparing: Boolean = false, val comparison: List<ComparisonResult> = emptyList(), val comparisonQuestion: String = ""
+    val comparing: Boolean = false, val comparison: List<ComparisonResult> = emptyList(), val comparisonQuestion: String = "",
+    // offline AI
+    val localModel: LocalModelState? = null, val providerError: String? = null
 )
 
-class ByakViewModel(private val api: ByakApi, private val billing: BillingManager) : ViewModel() {
+class ByakViewModel(private val api: ByakApi, private val billing: BillingManager, private val localModel: LocalModel? = null) : ViewModel() {
     /** True when BYAK runs entirely on this phone (no server). */
     val isLocal: Boolean get() = api.isLocal
     private var pendingBasePlan: String? = null
@@ -80,14 +85,42 @@ class ByakViewModel(private val api: ByakApi, private val billing: BillingManage
     }
 
     // ---------- providers ----------
-    fun addProvider(type: String, key: String, model: String, baseUrl: String = "", done: () -> Unit = {}) = task("Provider connected") {
-        api.addProvider(type, key.trim(), model.trim(), baseUrl.trim())
-        val list = api.providers(); update { copy(providers = list) }; done()
+    /** Errors show inside the Connect dialog (not behind it), and the dialog closes only on success. */
+    fun addProvider(type: String, key: String, model: String, baseUrl: String = "", done: () -> Unit = {}) = viewModelScope.launch {
+        update { copy(busy = true, providerError = null) }
+        try {
+            val added = api.addProvider(type, key.trim(), model.trim(), baseUrl.trim())
+            val list = api.providers(); update { copy(providers = list) }; done()
+            notice(if (added.lastValidatedAt != null) "Key works — ${added.name} is ready. Start a chat!" else "${added.name} saved")
+        } catch (e: CancellationException) { throw e }
+        catch (e: Exception) { update { copy(providerError = e.message ?: "Couldn't save this key") } }
+        finally { update { copy(busy = false) } }
     }
+    fun clearProviderError() = update { copy(providerError = null) }
     fun validateProvider(id: String) = task("Key works — you're ready to chat") { api.validateProvider(id); val list = api.providers(); update { copy(providers = list) } }
     fun removeProvider(id: String) = task("Provider removed") { api.deleteProvider(id); val list = api.providers(); update { copy(providers = list) } }
     fun setProviderEnabled(id: String, enabled: Boolean) = task { api.updateProvider(id, enabled = enabled); val list = api.providers(); update { copy(providers = list) } }
     fun setDefaultModel(id: String, model: String) = task("Default model updated") { api.updateProvider(id, defaultModel = model); val list = api.providers(); update { copy(providers = list) } }
+    // ---------- offline AI ----------
+    /** Offline AI only exists when BYAK runs on the phone. */
+    val offlineAvailable: Boolean get() = localModel != null && api.isLocal
+    fun refreshLocalModel() = viewModelScope.launch {
+        val model = localModel ?: return@launch
+        val current = runCatching { kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { model.state() } }.getOrNull() ?: return@launch
+        val was = state.value.localModel
+        update { copy(localModel = current) }
+        // When a download finishes, connect it automatically so the user can chat right away.
+        if (current.ready && was?.ready != true && state.value.providers.none { it.provider == Catalog.LOCAL && it.enabled }) useLocalModel()
+    }
+    fun downloadLocalModel() = task { val model = localModel ?: return@task; val next = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { model.startDownload() }; update { copy(localModel = next) } }
+    fun deleteLocalModel() = task("Offline AI deleted") {
+        val model = localModel ?: return@task
+        model.delete()
+        state.value.providers.filter { it.provider == Catalog.LOCAL }.forEach { api.deleteProvider(it.id) }
+        val list = api.providers(); update { copy(providers = list, localModel = model.state()) }
+    }
+    fun useLocalModel() = task("Offline AI connected — start a chat") { api.addProvider(Catalog.LOCAL, "", LocalModel.MODEL_ID, ""); val list = api.providers(); update { copy(providers = list) } }
+
     fun loadModels(providerId: String) = viewModelScope.launch {
         if (state.value.modelOptions.containsKey(providerId)) return@launch
         val models = runCatching { api.providerModels(providerId) }.getOrElse { emptyList() }
@@ -106,7 +139,7 @@ class ByakViewModel(private val api: ByakApi, private val billing: BillingManage
     fun closeConversation() { stopGeneration(); update { copy(activeConversation = null, messages = emptyList()) }; viewModelScope.launch { runCatching { refreshConversations() } } }
 
     fun newConversation(projectId: String? = null, firstMessage: String? = null) = task {
-        val provider = state.value.providers.firstOrNull { it.enabled } ?: throw ApiException("Connect an AI provider in Models first", 400)
+        val provider = state.value.providers.firstOrNull { it.enabled } ?: throw ApiException(NO_PROVIDER, 400)
         val item = api.createConversation(provider.id, provider.defaultModel, projectId)
         update { copy(activeConversation = item, messages = emptyList()) }
         refreshConversations()
@@ -127,7 +160,7 @@ class ByakViewModel(private val api: ByakApi, private val billing: BillingManage
 
     fun send(text: String) {
         val conversation = state.value.activeConversation ?: return
-        val provider = activeProvider(conversation) ?: run { update { copy(error = "Connect an AI provider in Models first") }; return }
+        val provider = activeProvider(conversation) ?: run { update { copy(error = NO_PROVIDER) }; return }
         val model = conversation.model.ifBlank { provider.defaultModel }; val web = state.value.webSearch
         state.value.editing?.let { original ->
             // Editing drops the original message and everything after it, locally and on the server.
@@ -182,28 +215,34 @@ class ByakViewModel(private val api: ByakApi, private val billing: BillingManage
         val pending = ChatMessage("local-assistant", "assistant", "", pending = true)
         update { copy(messages = messages + prefix + pending, streaming = true, error = null) }
         generation = viewModelScope.launch {
-            var answer = ""
+            var answer = ""; var failure: String? = null
+            fun fail(message: String) { failure = message }
             try {
                 source().collect { event ->
                     when (event) {
                         is StreamEvent.Delta -> { answer += event.text; update { copy(messages = messages.dropLast(1) + pending.copy(content = answer), generationStatus = null) } }
                         is StreamEvent.Complete -> update { copy(messages = messages.dropLast(1) + event.message) }
-                        is StreamEvent.Failed -> update { copy(error = event.message) }
+                        is StreamEvent.Failed -> fail(event.message)
                         is StreamEvent.Status -> update { copy(generationStatus = event.message) }
                     }
                 }
             } catch (e: CancellationException) { /* stopped by the user; the server keeps the partial answer */ }
             catch (e: ApiException) {
-                failed(e)
-                // Blocked before anything was saved: give the message and photos back so nothing is lost.
-                if (e.code == "plan_limit") prefix.firstOrNull()?.let { sent -> update { copy(composerPrefill = sent.content, drafts = sent.localImages) } }
+                if (e.code == "plan_limit") {
+                    failed(e)
+                    // Blocked before anything was saved: give the message and photos back so nothing is lost.
+                    prefix.firstOrNull()?.let { sent -> update { copy(composerPrefill = sent.content, drafts = sent.localImages) } }
+                } else fail(e.message ?: "Generation failed")
             }
-            catch (e: Exception) { update { copy(error = e.message ?: "Generation failed") } }
+            catch (e: Exception) { fail(e.message ?: "Generation failed") }
             finally {
                 update { copy(streaming = false, generationStatus = null) }
                 viewModelScope.launch {
                     delay(250) // let the server persist a stopped/partial answer
-                    runCatching { api.messages(conversation.id) }.onSuccess { list -> if (state.value.activeConversation?.id == conversation.id) update { copy(messages = list) } }
+                    // A failure stays visible in the chat as an error bubble with Retry, not just a passing snackbar.
+                    val errorBubble = failure?.let { ChatMessage("local-error-${System.nanoTime()}", "assistant", it, status = "failed") }
+                    runCatching { api.messages(conversation.id) }.onSuccess { list -> if (state.value.activeConversation?.id == conversation.id) update { copy(messages = list + listOfNotNull(errorBubble)) } }
+                        .onFailure { if (errorBubble != null) update { copy(messages = messages.filterNot { it.pending } + errorBubble) } }
                     runCatching { refreshConversations() }
                     runCatching { api.subscription() }.onSuccess { sub -> update { copy(subscription = sub) } } // refresh "N left today"
                 }
@@ -293,4 +332,6 @@ class ByakViewModel(private val api: ByakApi, private val billing: BillingManage
     }
 
     // BillingManager is application-scoped (shared by every screen and account), so the ViewModel must not close it.
+
+    private companion object { const val NO_PROVIDER = "Add an AI first: Models → add an API key, or download the free Offline AI." }
 }
