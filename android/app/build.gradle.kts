@@ -14,8 +14,8 @@ android {
         // Play already holds versionCode 34 (3.0.1) from the release/byak-v3.0.1-* line.
         // Google Play rejects a reused or lower versionCode, so this line continues at 35.
         // Raise this after every successful upload.
-        versionCode = 36
-        versionName = "3.1.1"
+        versionCode = 37
+        versionName = "3.2.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         fun prop(name: String, fallback: String) = (project.findProperty(name) as String?)?.takeIf { it.isNotBlank() } ?: System.getenv(name)?.takeIf { it.isNotBlank() } ?: fallback
         buildConfigField("String", "API_BASE_URL", "\"${prop("BYAK_API_URL", "http://10.0.2.2:8787")}\"")
@@ -98,6 +98,8 @@ dependencies {
     implementation("androidx.credentials:credentials:1.5.0")
     implementation("androidx.credentials:credentials-play-services-auth:1.5.0")
     implementation("com.google.android.libraries.identity.googleid:googleid:1.1.1")
+    // Offline AI (Qwen3 0.6B) — the same LiteRT-LM engine the 2.9 release shipped.
+    implementation("com.google.ai.edge.litertlm:litertlm-android:0.11.0")
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.json:json:20240303")
     androidTestImplementation("androidx.test.ext:junit:1.2.1")

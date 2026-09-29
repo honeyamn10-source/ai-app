@@ -68,7 +68,7 @@ fun Context.findActivity(): Activity? = when (this) { is Activity -> this; is Co
 
 @Composable private fun MainShell(app: ByakApplication, session: Session) {
     // Keyed by account so signing in as someone else never shows the previous account's chats, research or plan.
-    val vm: ByakViewModel = viewModel(key = "byak:${SessionStore.isOnDevice(session)}:${session.email}", factory = viewModelFactory { initializer { ByakViewModel(app.apiFor(session), app.billing) } })
+    val vm: ByakViewModel = viewModel(key = "byak:${SessionStore.isOnDevice(session)}:${session.email}", factory = viewModelFactory { initializer { ByakViewModel(app.apiFor(session), app.billing, if (SessionStore.isOnDevice(session)) app.localModel else null) } })
     val state by vm.state.collectAsState()
     var destination by rememberSaveable { mutableStateOf(Destination.Home) }
     val drawer = rememberDrawerState(DrawerValue.Closed)

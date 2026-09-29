@@ -144,6 +144,7 @@ Providers the app can be configured to call:
 | Groq | `api.groq.com` |
 | Mistral AI | `api.mistral.ai` |
 | DeepSeek | `api.deepseek.com` |
+| NVIDIA | `integrate.api.nvidia.com` |
 | Any custom OpenAI-compatible endpoint you enter | as you specify |
 
 **Cost and terms.** These providers bill you directly through your own API key. BYAK AI does not
@@ -152,6 +153,12 @@ or free third-party model usage — it only raises the in-app limits listed in s
 of each provider is governed by that provider's terms of service and privacy policy, including
 its own retention practices, training practices and retention periods, over which BYAK AI has no
 control.
+
+**Offline AI.** If you choose to download the offline model (Qwen3 0.6B), the app downloads the
+model file once from Hugging Face (`huggingface.co`) through Android's download manager. Hugging
+Face receives an ordinary download request (such as your IP address), not your conversations.
+After that, offline AI answers are generated entirely on your phone and nothing you type is sent
+anywhere. Deleting the model from the Models screen removes the file.
 
 ### 5.2 Web search and research
 
