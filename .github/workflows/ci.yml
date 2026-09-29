@@ -55,6 +55,8 @@ jobs:
           BYAK_SUPPORT_EMAIL: ${{ vars.BYAK_SUPPORT_EMAIL }}
           BYAK_PRIVACY_POLICY_URL: ${{ vars.BYAK_PRIVACY_POLICY_URL }}
           BYAK_TERMS_URL: ${{ vars.BYAK_TERMS_URL }}
+      - name: Check native libraries support 16 KB pages (Google Play requirement)
+        run: python3 scripts/check-16kb-alignment.py android/app/build/outputs/bundle/release/app-release.aab
       - name: Upload signed Play bundle
         if: steps.keystore.outputs.decoded == 'true'
         uses: actions/upload-artifact@v4

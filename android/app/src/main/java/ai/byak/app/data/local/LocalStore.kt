@@ -34,7 +34,9 @@ class LocalStore(context: Context) {
     }
     private fun save(data: JSONObject) {
         val next = File(file.parentFile, "${file.name}.next")
-        next.writeText(data.toString()); next.renameTo(file)
+        next.writeText(data.toString())
+        // rename is atomic; if the filesystem refuses it, copy instead so a save is never silently lost.
+        if (!next.renameTo(file)) { next.copyTo(file, overwrite = true); next.delete() }
     }
 
     /** Read-only access to the current data. */
@@ -44,7 +46,7 @@ class LocalStore(context: Context) {
 
     suspend fun wipe() = lock.withLock { withContext(Dispatchers.IO) { root = JSONObject(); file.delete(); attachmentsDir.listFiles()?.forEach { it.delete() }; blobsDir.listFiles()?.forEach { it.delete() } } }
 
-    fun writeBlob(name: String, text: String) { val target = File(blobsDir, name); val next = File(blobsDir, "$name.next"); next.writeText(text); next.renameTo(target) }
+    fun writeBlob(name: String, text: String) { val target = File(blobsDir, name); val next = File(blobsDir, "$name.next"); next.writeText(text); if (!next.renameTo(target)) { next.copyTo(target, overwrite = true); next.delete() } }
     fun readBlob(name: String): String? = File(blobsDir, name).takeIf { it.exists() }?.readText()
     fun deleteBlob(name: String) { File(blobsDir, name).delete() }
 

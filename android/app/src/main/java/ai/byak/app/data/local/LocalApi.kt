@@ -209,7 +209,8 @@ class LocalApi(
         val conversation = store.read { db -> db.find("conversations", conversationId)?.let { JSONObject(it.toString()) } } ?: throw ApiException("Not found", 404)
         val (c, providerRow) = resolve(providerId ?: conversation.optString("providerId").ifBlank { null })
         val project = store.read { db -> conversation.optString("projectId").ifBlank { null }?.let { db.find("projects", it) }?.let { JSONObject(it.toString()) } }
-        val model = requestedModel?.ifBlank { null } ?: conversation.optString("model").ifBlank { null } ?: project?.optString("preferredModel")?.ifBlank { null } ?: providerRow.optString("defaultModel")
+        val sameProvider = conversation.optString("providerId") == providerRow.optString("id")
+        val model = requestedModel?.ifBlank { null } ?: conversation.optString("model").ifBlank { null }?.takeIf { sameProvider } ?: project?.optString("preferredModel")?.ifBlank { null } ?: providerRow.optString("defaultModel")
         val (history, question) = store.read { db ->
             val all = db.all("messages").filter { it.optString("conversationId") == conversationId }.takeLast(limits.getValue("historyMessages"))
             all.map { m ->
