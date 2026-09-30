@@ -66,15 +66,18 @@ class Gateway(private val localModel: LocalModel? = null, private val client: Ok
         else -> apply { if (c.apiKey.isNotBlank()) header("Authorization", "Bearer ${c.apiKey}"); if (c.provider == "openrouter") header("X-Title", "BYAK AI") }
     }
 
-    private fun failure(label: String, response: Response): ApiException {
+    /** OpenRouter by id, or a "Custom" provider pointed at openrouter.ai. */
+    fun isOpenRouter(c: Connection) = c.provider == "openrouter" || c.baseUrl.contains("openrouter.ai", ignoreCase = true)
+
+    private fun failure(label: String, response: Response, openRouter: Boolean = false): ApiException {
         val body = runCatching { response.body?.string().orEmpty() }.getOrDefault("")
         val detail = runCatching { JSONObject(body).let { it.optJSONObject("error")?.optString("message") ?: it.optString("message") } }.getOrNull().orEmpty()
         val hint = when {
             // Free OpenRouter models are hidden unless the account allows free-model data sharing.
             detail.contains("data policy", true) -> "your OpenRouter privacy settings block this model — open openrouter.ai/settings/privacy and allow free model endpoints, or pick a paid model"
-            response.code == 429 && label == "OpenRouter" && detail.contains("free", true) -> "today's free OpenRouter limit is used up (about 50 free messages a day without credits) — add \$10 of credits to raise it, or try tomorrow"
+            response.code == 429 && openRouter && detail.contains("free", true) -> "today's free OpenRouter limit is used up (about 50 free messages a day without credits) — add \$10 of credits to raise it, or try tomorrow"
             response.code == 402 && label == "Pollinations" -> "no pollen left on this Pollinations key — top up at enter.pollinations.ai, or pick a cheaper model"
-            response.code == 402 && label == "OpenRouter" -> "no credits on this OpenRouter key — add credits at openrouter.ai, or pick a model ending in :free (Models → model)"
+            response.code == 402 && openRouter -> "this model costs credits and the key has none — choose a model ending in :free, or add credits at openrouter.ai"
             response.code == 402 -> "your account at the provider is out of credit"
             response.code == 429 -> "rate limited or out of credit at the provider — wait a moment and retry"
             response.code == 401 || response.code == 403 || (response.code == 400 && detail.contains("API key", true)) -> "the provider rejected your API key (Models → Change key)"
@@ -84,7 +87,7 @@ class Gateway(private val localModel: LocalModel? = null, private val client: Ok
         }
         // Marked so a chat can switch to a model that still exists instead of failing every time.
         val gone = !detail.contains("data policy", true) && (response.code == 404 || (response.code == 400 && Regex("not a valid model|model_not_found|does not exist|no endpoints found|unknown model|invalid model", RegexOption.IGNORE_CASE).containsMatchIn(detail)))
-        return ApiException("$label: $hint${if (detail.isNotBlank()) " — ${detail.take(300)}" else ""}", response.code, if (gone) MODEL_UNAVAILABLE else null)
+        return ApiException("$label: $hint${if (detail.isNotBlank()) " — ${detail.take(300)}" else ""}", response.code, when { gone -> MODEL_UNAVAILABLE; response.code == 402 && openRouter -> NO_CREDITS; else -> null })
     }
 
     private suspend fun execute(http: OkHttpClient, request: Request): Response = withContext(Dispatchers.IO) {
@@ -97,7 +100,7 @@ class Gateway(private val localModel: LocalModel? = null, private val client: Ok
         if (kind(c) == "local") return@withContext listOf(LocalModel.MODEL_ID)
         val path = if (kind(c) == "gemini") "/models?pageSize=200" else "/models"
         execute(quick, Request.Builder().url(base(c) + path).auth(c).get().build()).use { res ->
-            if (!res.isSuccessful) throw failure(c.name, res)
+            if (!res.isSuccessful) throw failure(c.name, res, isOpenRouter(c))
             val data = JSONObject(res.body?.string().orEmpty())
             if (kind(c) == "gemini") data.optJSONArray("models").objects().filter { m -> m.optJSONArray("supportedGenerationMethods")?.let { a -> (0 until a.length()).any { a.getString(it) == "generateContent" } } == true }.map { it.optString("name").removePrefix("models/") }
             else (data.optJSONArray("data") ?: data.optJSONArray("models")).objects().map { it.optString("id").ifBlank { it.optString("name") } }.filter { it.isNotBlank() }.sorted()
@@ -110,15 +113,15 @@ class Gateway(private val localModel: LocalModel? = null, private val client: Ok
     /** Proves the key works. OpenRouter lists models without a key, so it is checked on its key endpoint instead. */
     suspend fun verify(c: Connection): KeyCheck = withContext(Dispatchers.IO) {
         var freeOnly = false
-        if (c.provider == "openrouter") execute(quick, Request.Builder().url(base(c) + "/key").auth(c).get().build()).use { res ->
-            if (!res.isSuccessful) throw failure(c.name, res)
+        if (isOpenRouter(c)) execute(quick, Request.Builder().url(base(c) + "/key").auth(c).get().build()).use { res ->
+            if (!res.isSuccessful) throw failure(c.name, res, isOpenRouter(c))
             freeOnly = runCatching { JSONObject(res.body?.string().orEmpty()).optJSONObject("data")?.optBoolean("is_free_tier") }.getOrNull() == true
         }
         KeyCheck(listModels(c), freeOnly)
     }
 
     private class InlineSystemRetry : RuntimeException()
-    companion object { const val MODEL_UNAVAILABLE = "model_unavailable" }
+    companion object { const val MODEL_UNAVAILABLE = "model_unavailable"; const val NO_CREDITS = "no_credits" }
 
     /** Streams one answer; [onDelta] receives text as it arrives. Cancelling the coroutine cancels the HTTP call. */
     suspend fun stream(c: Connection, model: String, system: String, turns: List<Turn>, onDelta: (String) -> Unit): Completion = stream(c, model, system, turns, onDelta, inlineSystem = false)
@@ -147,7 +150,7 @@ class Gateway(private val localModel: LocalModel? = null, private val client: Ok
         val emit = { delta: String -> if (delta.isNotEmpty()) { text += delta; onDelta(delta) } }
         try { execute(client, request).use { res ->
             if (!res.isSuccessful) {
-                val error = failure(c.name, res)
+                val error = failure(c.name, res, isOpenRouter(c))
                 // Some models (e.g. Gemma via OpenRouter) refuse a system message: retry once with it inlined.
                 if (kind(c) == "openai" && !inlineSystem && system.isNotBlank() && error.status == 400 && Regex("system|developer|instruction", RegexOption.IGNORE_CASE).containsMatchIn(error.message.orEmpty())) throw InlineSystemRetry()
                 throw error
@@ -175,7 +178,12 @@ class Gateway(private val localModel: LocalModel? = null, private val client: Ok
                         event.optJSONObject("usageMetadata")?.let { input = it.optLong("promptTokenCount"); output = it.optLong("candidatesTokenCount") }
                     }
                     else -> {
-                        event.optJSONObject("error")?.let { throw ApiException("${c.name}: ${it.optString("message")}", 502) }
+                        event.optJSONObject("error")?.let { err ->
+                            // OpenRouter can report errors inside the stream; keep their meaning so the chat can recover.
+                            val code = err.optInt("code"); val message = err.optString("message")
+                            val tag = when { code == 402 && isOpenRouter(c) -> NO_CREDITS; code == 404 && !message.contains("data policy", true) -> MODEL_UNAVAILABLE; else -> null }
+                            throw ApiException("${c.name}: ${if (tag == NO_CREDITS) "this model costs credits and the key has none — " else ""}$message", if (code in 400..599) code else 502, tag)
+                        }
                         val choice = event.optJSONArray("choices")?.optJSONObject(0)
                         choice?.optJSONObject("delta")?.optString("content")?.takeIf { it != "null" }?.let(emit)
                         choice?.optString("finish_reason")?.takeIf { it.isNotBlank() && it != "null" }?.let { stop = it }
