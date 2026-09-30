@@ -6,23 +6,19 @@ jobs:
   check:
     runs-on: ubuntu-latest
     steps:
-      - name: Same requests the app makes (no key)
+      - name: Pollinations without a key
         run: |
-          set -x
-          curl -sS -o models.json -w 'models: HTTP %{http_code} size %{size_download} bytes in %{time_total}s\n' -H 'Accept: application/json' https://openrouter.ai/api/v1/models
-          python3 - <<'PY'
-          import json
-          d = json.load(open('models.json'))
-          ids = [m.get('id') for m in (d.get('data') or d.get('models') or [])]
-          free = [i for i in ids if i and i.endswith(':free')]
-          print('top-level keys:', list(d.keys()))
-          print('model count:', len(ids), 'free count:', len(free))
-          print('first 5 ids:', ids[:5])
-          print('free models:', free[:60])
-          want = ["openai/gpt-4.1-mini","google/gemini-2.5-flash","anthropic/claude-sonnet-5","deepseek/deepseek-chat-v3-0324:free","meta-llama/llama-3.3-70b-instruct:free","qwen/qwen3-235b-a22b:free","google/gemini-2.0-flash-exp:free","mistralai/mistral-small-3.2-24b-instruct:free"]
-          for w in want: print('present?', w, w in ids)
-          print('sample entry:', json.dumps((d.get('data') or [{}])[0])[:600])
-          PY
-          curl -sS -w '\nkey endpoint (no key): HTTP %{http_code}\n' https://openrouter.ai/api/v1/key
-          curl -sS -w '\nmodels with bad key: HTTP %{http_code}\n' -o /dev/null -H 'Authorization: Bearer sk-or-v1-bad' https://openrouter.ai/api/v1/models
-          curl -sS -w '\nchat with bad key: HTTP %{http_code}\n' -H 'Authorization: Bearer sk-or-v1-bad' -H 'Content-Type: application/json' -d '{"model":"openai/gpt-4.1-mini","stream":true,"messages":[{"role":"user","content":"hi"}]}' https://openrouter.ai/api/v1/chat/completions
+          set +e
+          echo "== text.pollinations.ai/models";   curl -sS -m 30 -w '\nHTTP %{http_code}\n' https://text.pollinations.ai/models | head -c 1500; echo
+          echo "== gen.pollinations.ai/v1/models"; curl -sS -m 30 -w '\nHTTP %{http_code}\n' https://gen.pollinations.ai/v1/models | head -c 1500; echo
+          for url in https://text.pollinations.ai/openai https://gen.pollinations.ai/v1/chat/completions; do
+            for model in openai openai-fast mistral; do
+              echo "== POST $url model=$model (stream)"
+              curl -sS -m 60 -w '\nHTTP %{http_code}\n' -H 'Content-Type: application/json' -H 'Referer: https://honeyamn10-source.github.io/' \
+                -d "{\"model\":\"$model\",\"stream\":true,\"messages\":[{\"role\":\"system\",\"content\":\"Be brief.\"},{\"role\":\"user\",\"content\":\"Say hello in 3 words\"}]}" "$url" | head -c 1200; echo
+            done
+          done
+          echo "== GET text.pollinations.ai/{prompt}"; curl -sS -m 60 -w '\nHTTP %{http_code}\n' "https://text.pollinations.ai/Say%20hello%20in%203%20words" | head -c 600; echo
+          echo "== GET gen.pollinations.ai/text/{prompt}"; curl -sS -m 60 -w '\nHTTP %{http_code}\n' "https://gen.pollinations.ai/text/Say%20hello%20in%203%20words" | head -c 600; echo
+          sleep 16
+          echo "== second request 16s later (rate limit)"; curl -sS -m 60 -w '\nHTTP %{http_code}\n' -H 'Content-Type: application/json' -d '{"model":"openai","messages":[{"role":"user","content":"Say bye in 2 words"}]}' https://text.pollinations.ai/openai | head -c 800; echo
