@@ -279,11 +279,16 @@ class LocalApi(
         try {
             val result = try { gateway.stream(c, model, system, history) { delta -> partial += delta; send(StreamEvent.Delta(delta)) } }
             catch (e: ApiException) {
-                // The model was retired or renamed (common for free OpenRouter models): switch to one that exists and retry once.
-                if (e.code != Gateway.MODEL_UNAVAILABLE || partial.isNotEmpty()) throw e
-                val check = runCatching { Gateway.KeyCheck(gateway.listModels(c), providerRow.optBoolean("freeOnly")) }.getOrNull() ?: throw e
-                val replacement = pickModel("", Catalog.entry(c.provider)?.models.orEmpty(), check).takeIf { it != model && it in check.models } ?: throw e
-                send(StreamEvent.Status("$model is no longer available — switching to $replacement…"))
+                // Recover once instead of failing every message:
+                //  • the model was retired or renamed (common for free OpenRouter models) → a model that exists;
+                //  • OpenRouter says "no credits" for a paid model → this key can only run free models, so use one.
+                val noCredits = e.code == Gateway.NO_CREDITS
+                if ((e.code != Gateway.MODEL_UNAVAILABLE && !noCredits) || partial.isNotEmpty()) throw e
+                val freeOnly = noCredits || providerRow.optBoolean("freeOnly")
+                val check = runCatching { Gateway.KeyCheck(gateway.listModels(c), freeOnly) }.getOrNull() ?: throw e
+                val replacement = pickModel("", Catalog.entry(c.provider)?.models.orEmpty(), check).takeIf { it != model && it in check.models && (!freeOnly || it.endsWith(":free")) } ?: throw e
+                if (noCredits) store.write { db -> db.update("providers", providerRow.getString("id")) { it.put("freeOnly", true) } }
+                send(StreamEvent.Status(if (noCredits) "This key has no credits — switching to the free model $replacement…" else "$model is no longer available — switching to $replacement…"))
                 val retired = model
                 updateProvider(providerRow.getString("id"), defaultModel = replacement)
                 store.write { db -> db.update("conversations", conversationId) { if (it.optString("model") == retired) it.put("model", "") } }
