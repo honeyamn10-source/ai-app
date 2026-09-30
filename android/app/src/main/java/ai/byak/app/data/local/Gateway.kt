@@ -26,7 +26,7 @@ object Catalog {
         Entry("openai", "OpenAI", "https://api.openai.com/v1", "openai", listOf("gpt-4.1-mini", "gpt-4.1", "o4-mini"), usageOption = true),
         Entry("anthropic", "Anthropic Claude", "https://api.anthropic.com/v1", "anthropic", listOf("claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-4-5")),
         Entry("gemini", "Google Gemini", "https://generativelanguage.googleapis.com/v1beta", "gemini", listOf("gemini-2.5-flash", "gemini-2.5-pro")),
-        Entry("openrouter", "OpenRouter", "https://openrouter.ai/api/v1", "openai", listOf("openai/gpt-4.1-mini", "google/gemini-2.5-flash", "anthropic/claude-sonnet-5"), usageOption = true),
+        Entry("openrouter", "OpenRouter", "https://openrouter.ai/api/v1", "openai", listOf("openai/gpt-4.1-mini", "google/gemini-2.5-flash", "anthropic/claude-sonnet-5")),
         Entry("groq", "Groq", "https://api.groq.com/openai/v1", "openai", listOf("llama-3.3-70b-versatile"), usageOption = true),
         Entry("mistral", "Mistral", "https://api.mistral.ai/v1", "openai", listOf("mistral-small-latest", "mistral-large-latest")),
         Entry("deepseek", "DeepSeek", "https://api.deepseek.com/v1", "openai", listOf("deepseek-chat", "deepseek-reasoner"), usageOption = true),
@@ -87,7 +87,7 @@ class Gateway(private val localModel: LocalModel? = null, private val client: Ok
         }
         // Marked so a chat can switch to a model that still exists instead of failing every time.
         val gone = !detail.contains("data policy", true) && (response.code == 404 || (response.code == 400 && Regex("not a valid model|model_not_found|does not exist|no endpoints found|unknown model|invalid model", RegexOption.IGNORE_CASE).containsMatchIn(detail)))
-        return ApiException("$label: $hint${if (detail.isNotBlank()) " — ${detail.take(300)}" else ""}", response.code, when { gone -> MODEL_UNAVAILABLE; response.code == 402 && openRouter -> NO_CREDITS; else -> null })
+        return ApiException("$label: $hint${if (detail.isNotBlank()) " — ${detail.take(300)}" else ""}", response.code, when { gone -> MODEL_UNAVAILABLE; response.code == 402 && openRouter -> NO_CREDITS; response.code == 429 && openRouter && detail.contains("upstream", true) -> BUSY; else -> null })
     }
 
     private suspend fun execute(http: OkHttpClient, request: Request): Response = withContext(Dispatchers.IO) {
@@ -121,7 +121,7 @@ class Gateway(private val localModel: LocalModel? = null, private val client: Ok
     }
 
     private class InlineSystemRetry : RuntimeException()
-    companion object { const val MODEL_UNAVAILABLE = "model_unavailable"; const val NO_CREDITS = "no_credits" }
+    companion object { const val MODEL_UNAVAILABLE = "model_unavailable"; const val NO_CREDITS = "no_credits"; const val BUSY = "busy_upstream" }
 
     /** Streams one answer; [onDelta] receives text as it arrives. Cancelling the coroutine cancels the HTTP call. */
     suspend fun stream(c: Connection, model: String, system: String, turns: List<Turn>, onDelta: (String) -> Unit): Completion = stream(c, model, system, turns, onDelta, inlineSystem = false)
@@ -140,7 +140,11 @@ class Gateway(private val localModel: LocalModel? = null, private val client: Ok
             "gemini" -> "${base(c)}/models/${java.net.URLEncoder.encode(model, "UTF-8")}:streamGenerateContent?alt=sse" to JSONObject()
                 .put("contents", JSONArray(merged.map { t -> JSONObject().put("role", if (t.role == "assistant") "model" else "user").put("parts", JSONArray(t.images.map { i -> JSONObject().put("inline_data", JSONObject().put("mime_type", i.mimeType).put("data", b64(i))) } + JSONObject().put("text", t.content.ifBlank { "Describe this image." }))) }))
                 .apply { if (system.isNotBlank()) put("systemInstruction", JSONObject().put("parts", JSONArray().put(JSONObject().put("text", system)))) }
-            else -> "${base(c)}/chat/completions" to JSONObject().put("model", model).put("stream", true).apply { if (Catalog.entry(c.provider)?.usageOption == true) put("stream_options", JSONObject().put("include_usage", true)) }
+            else -> "${base(c)}/chat/completions" to JSONObject().put("model", model).put("stream", true).apply {
+                    // OpenRouter uses its own usage flag; some of the providers behind it reject OpenAI's stream_options.
+                    if (isOpenRouter(c)) put("usage", JSONObject().put("include", true))
+                    else if (Catalog.entry(c.provider)?.usageOption == true) put("stream_options", JSONObject().put("include_usage", true))
+                }
                 .put("messages", JSONArray((if (system.isNotBlank() && !inlineSystem) listOf(JSONObject().put("role", "system").put("content", system)) else emptyList()) + merged.map { t ->
                     JSONObject().put("role", t.role).put("content", if (t.images.isEmpty()) t.content else JSONArray(listOf(JSONObject().put("type", "text").put("text", t.content.ifBlank { "Describe this image." })) + t.images.map { i -> JSONObject().put("type", "image_url").put("image_url", JSONObject().put("url", "data:${i.mimeType};base64,${b64(i)}")) }))
                 }))
@@ -181,7 +185,7 @@ class Gateway(private val localModel: LocalModel? = null, private val client: Ok
                         event.optJSONObject("error")?.let { err ->
                             // OpenRouter can report errors inside the stream; keep their meaning so the chat can recover.
                             val code = err.optInt("code"); val message = err.optString("message")
-                            val tag = when { code == 402 && isOpenRouter(c) -> NO_CREDITS; code == 404 && !message.contains("data policy", true) -> MODEL_UNAVAILABLE; else -> null }
+                            val tag = when { code == 402 && isOpenRouter(c) -> NO_CREDITS; code == 429 && isOpenRouter(c) -> BUSY; code == 404 && !message.contains("data policy", true) -> MODEL_UNAVAILABLE; else -> null }
                             throw ApiException("${c.name}: ${if (tag == NO_CREDITS) "this model costs credits and the key has none — " else ""}$message", if (code in 400..599) code else 502, tag)
                         }
                         val choice = event.optJSONArray("choices")?.optJSONObject(0)
