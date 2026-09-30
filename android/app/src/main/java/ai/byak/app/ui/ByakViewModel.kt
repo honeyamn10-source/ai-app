@@ -157,11 +157,14 @@ class ByakViewModel(private val api: ByakApi, private val billing: BillingManage
 
     private fun activeProvider(conversation: Conversation): Provider? =
         state.value.providers.firstOrNull { it.id == conversation.providerId && it.enabled } ?: state.value.providers.firstOrNull { it.enabled }
+    /** The chat's model only belongs to the chat's own provider; after a fallback to another provider, use that provider's default. */
+    private fun modelFor(conversation: Conversation, provider: Provider): String =
+        conversation.model.takeIf { it.isNotBlank() && conversation.providerId == provider.id } ?: provider.defaultModel
 
     fun send(text: String) {
         val conversation = state.value.activeConversation ?: return
         val provider = activeProvider(conversation) ?: run { update { copy(error = NO_PROVIDER) }; return }
-        val model = conversation.model.ifBlank { provider.defaultModel }; val web = state.value.webSearch
+        val model = modelFor(conversation, provider); val web = state.value.webSearch
         state.value.editing?.let { original ->
             // Editing drops the original message and everything after it, locally and on the server.
             val kept = state.value.messages.takeWhile { it.id != original.id }
@@ -170,6 +173,8 @@ class ByakViewModel(private val api: ByakApi, private val billing: BillingManage
             return
         }
         val images = state.value.drafts
+        // The offline model reads text only: stop here so no photo allowance is used and the photo stays attached.
+        if (images.isNotEmpty() && provider.provider == Catalog.LOCAL) { update { copy(error = "Offline AI can't see photos. Tap the model name at the top and pick a model with an API key, or remove the photo.", composerPrefill = text) }; return }
         val local = ChatMessage("local-user-${System.nanoTime()}", "user", text, localImages = images)
         update { copy(drafts = emptyList()) }
         streamInto(conversation, listOf(local)) { api.streamMessage(conversation.id, text, provider.id, model, images, web) }
@@ -180,7 +185,7 @@ class ByakViewModel(private val api: ByakApi, private val billing: BillingManage
         val provider = activeProvider(conversation) ?: return
         val trimmed = state.value.messages.dropLastWhile { it.role == "assistant" }
         update { copy(messages = trimmed) }
-        streamInto(conversation, emptyList()) { api.regenerate(conversation.id, provider.id, conversation.model.ifBlank { provider.defaultModel }, state.value.webSearch) }
+        streamInto(conversation, emptyList()) { api.regenerate(conversation.id, provider.id, modelFor(conversation, provider), state.value.webSearch) }
     }
 
     fun startEdit(message: ChatMessage) { if (!state.value.streaming) update { copy(editing = message, composerPrefill = message.content) } }
@@ -310,7 +315,13 @@ class ByakViewModel(private val api: ByakApi, private val billing: BillingManage
     fun changePassword(current: String, new: String, done: () -> Unit) = task("Password changed. Other devices were signed out.") { api.changePassword(current, new); done() }
     suspend fun exportData(): String? = runCatching { api.exportData() }.onFailure { update { copy(error = it.message) } }.getOrNull()
     fun logout() = viewModelScope.launch { stopGeneration(); api.logout() }
-    fun deleteAccount() = task { api.deleteAccount()?.let { message -> notice(message) } }
+    fun deleteAccount() = task {
+        stopGeneration()
+        val message = api.deleteAccount()
+        // The same ViewModel can come back after an on-device erase, so drop everything it was showing.
+        _state.value = UiState(localModel = state.value.localModel)
+        message?.let { notice(it) }
+    }
 
     // ---------- billing ----------
     fun loadPlans(productId: String, basePlans: List<String>) = task {

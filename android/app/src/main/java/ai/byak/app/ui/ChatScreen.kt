@@ -94,7 +94,7 @@ import kotlinx.coroutines.launch
     var choosingPrompt by remember { mutableStateOf(false) }
     val listState = rememberLazyListState(); val context = LocalContext.current; val scope = rememberCoroutineScope()
     val provider = state.providers.firstOrNull { it.id == conversation.providerId } ?: state.providers.firstOrNull { it.enabled }
-    val model = conversation.model.ifBlank { provider?.defaultModel.orEmpty() }
+    val model = conversation.model.takeIf { it.isNotBlank() && provider?.id == conversation.providerId } ?: provider?.defaultModel.orEmpty()
     val lastAssistant = state.messages.lastOrNull()?.takeIf { it.role == "assistant" && !it.pending }
     val lastUser = state.messages.lastOrNull { it.role == "user" && !it.id.startsWith("local-") }
     val speaker = rememberSpeaker()

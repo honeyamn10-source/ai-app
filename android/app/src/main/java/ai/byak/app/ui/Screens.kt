@@ -43,12 +43,12 @@ import kotlinx.coroutines.withContext
 // ---------- Home ----------
 @Composable fun HomeScreen(session: Session, state: UiState, vm: ByakViewModel, navigate: (Destination) -> Unit) {
     LazyColumn(Modifier.fillMaxSize().padding(horizontal = 20.dp), contentPadding = PaddingValues(vertical = 22.dp), verticalArrangement = Arrangement.spacedBy(18.dp)) {
-        item { Text("Good to see you, ${session.name.substringBefore(' ').ifBlank { "there" }}", fontSize = 28.sp, fontWeight = FontWeight.Black); Text("One intelligent workspace. Your models, your data, your choice.", color = MaterialTheme.colorScheme.onSurfaceVariant) }
+        item { Text("Good to see you, ${session.name.substringBefore(' ').takeUnless { it.isBlank() || it == "You" } ?: "there"}", fontSize = 28.sp, fontWeight = FontWeight.Black); Text("One intelligent workspace. Your models, your data, your choice.", color = MaterialTheme.colorScheme.onSurfaceVariant) }
         item {
             val ready = state.providers.any { it.enabled }
             Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer), shape = RoundedCornerShape(28.dp), onClick = { if (ready) { vm.newConversation(); navigate(Destination.Chats) } else navigate(Destination.Models) }) {
                 Row(Modifier.padding(24.dp).fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    Column(Modifier.weight(1f)) { Text(if (ready) "Start a new chat" else "Connect your first model", fontWeight = FontWeight.Bold, fontSize = 22.sp); Text(if (ready) "Ask anything with ${state.providers.first { it.enabled }.name}" else "Bring an API key from OpenAI, Anthropic, Google and more") }
+                    Column(Modifier.weight(1f)) { Text(if (ready) "Start a new chat" else "Connect your first model", fontWeight = FontWeight.Bold, fontSize = 22.sp); Text(if (ready) "Ask anything with ${state.providers.first { it.enabled }.name}" else "Add an API key (OpenAI, Claude, Gemini…) or download the free Offline AI") }
                     Icon(Icons.AutoMirrored.Outlined.ArrowForward, null)
                 }
             }

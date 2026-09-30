@@ -92,7 +92,7 @@ fun Context.findActivity(): Activity? = when (this) { is Activity -> this; is Co
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val wide = maxWidth >= 720.dp
         ModalNavigationDrawer(drawerState = drawer, gesturesEnabled = !wide && drawer.isOpen, drawerContent = {
-            ModalDrawerSheet { DrawerContent(session, state.subscription.isPro, destination, navigate) }
+            ModalDrawerSheet { DrawerContent(session, state.subscription.isPro, destination, vm.isLocal, navigate) }
         }) {
             Scaffold(
                 topBar = {
@@ -111,7 +111,7 @@ fun Context.findActivity(): Activity? = when (this) { is Activity -> this; is Co
             ) { padding ->
                 Row(Modifier.padding(padding).consumeWindowInsets(padding).fillMaxSize()) {
                     if (wide) NavigationRail(header = { Surface(Modifier.padding(12.dp), color = MaterialTheme.colorScheme.primary, shape = RoundedCornerShape(14.dp)) { Icon(Icons.Outlined.AutoAwesome, null, Modifier.padding(10.dp), tint = Color.White) } }) {
-                        Destination.entries.forEach { item -> NavigationRailItem(selected = destination == item, onClick = { destination = item }, icon = { Icon(item.icon, item.title) }, label = { Text(item.title, maxLines = 1) }) }
+                        Destination.entries.filterNot { vm.isLocal && it == Destination.Devices }.forEach { item -> NavigationRailItem(selected = destination == item, onClick = { destination = item }, icon = { Icon(item.icon, item.title) }, label = { Text(item.title, maxLines = 1) }) }
                     }
                     Box(Modifier.weight(1f).fillMaxHeight()) {
                         when (destination) {
@@ -136,12 +136,13 @@ fun Context.findActivity(): Activity? = when (this) { is Activity -> this; is Co
     }
 }
 
-@Composable private fun DrawerContent(session: Session, pro: Boolean, selected: Destination, navigate: (Destination) -> Unit) {
+@Composable private fun DrawerContent(session: Session, pro: Boolean, selected: Destination, local: Boolean, navigate: (Destination) -> Unit) {
     Column(Modifier.padding(horizontal = 12.dp, vertical = 20.dp)) {
         Text("BYAK AI", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black, modifier = Modifier.padding(horizontal = 16.dp))
         Text("${session.name} · ${if (pro) "Pro" else "Free"}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp))
         Spacer(Modifier.height(12.dp))
-        Destination.entries.forEach { item -> NavigationDrawerItem(label = { Text(item.title) }, icon = { Icon(item.icon, null) }, selected = selected == item, onClick = { navigate(item) }) }
+        // "Devices" only means something with a server account; on the phone there is just this one.
+        Destination.entries.filterNot { local && it == Destination.Devices }.forEach { item -> NavigationDrawerItem(label = { Text(item.title) }, icon = { Icon(item.icon, null) }, selected = selected == item, onClick = { navigate(item) }) }
     }
 }
 
