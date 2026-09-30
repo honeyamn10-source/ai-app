@@ -91,7 +91,11 @@ class ByakViewModel(private val api: ByakApi, private val billing: BillingManage
         try {
             val added = api.addProvider(type, key.trim(), model.trim(), baseUrl.trim())
             val list = api.providers(); update { copy(providers = list) }; done()
-            notice(if (added.lastValidatedAt != null) "Key works — ${added.name} is ready. Start a chat!" else "${added.name} saved")
+            notice(when {
+                added.lastValidatedAt == null -> "${added.name} saved — tap Test on its card to check the key"
+                added.defaultModel.endsWith(":free") && !model.trim().endsWith(":free") -> "Key works. It has no credits, so a free model was chosen: ${added.defaultModel}. Change it on the ${added.name} card."
+                else -> "Key works — ${added.name} is ready with ${added.defaultModel}. Start a chat!"
+            })
         } catch (e: CancellationException) { throw e }
         catch (e: Exception) { update { copy(providerError = e.message ?: "Couldn't save this key") } }
         finally { update { copy(busy = false) } }
@@ -105,7 +109,12 @@ class ByakViewModel(private val api: ByakApi, private val billing: BillingManage
     fun validateProvider(id: String) = task("Key works — you're ready to chat") { api.validateProvider(id); val list = api.providers(); update { copy(providers = list) } }
     fun removeProvider(id: String) = task("Provider removed") { api.deleteProvider(id); val list = api.providers(); update { copy(providers = list) } }
     fun setProviderEnabled(id: String, enabled: Boolean) = task { api.updateProvider(id, enabled = enabled); val list = api.providers(); update { copy(providers = list) } }
-    fun setDefaultModel(id: String, model: String) = task("Default model updated") { api.updateProvider(id, defaultModel = model); val list = api.providers(); update { copy(providers = list) } }
+    fun setDefaultModel(id: String, model: String) = task("Default model updated — your chats with this provider use it now") {
+        api.updateProvider(id, defaultModel = model); val list = api.providers(); update { copy(providers = list) }
+        // Chats that followed the old default now follow the new one; reload the open chat so it isn't stale.
+        refreshConversations()
+        state.value.activeConversation?.let { open -> state.value.conversations.firstOrNull { it.id == open.id }?.let { fresh -> update { copy(activeConversation = fresh) } } }
+    }
     // ---------- offline AI ----------
     /** Offline AI only exists when BYAK runs on the phone. */
     val offlineAvailable: Boolean get() = localModel != null && api.isLocal
@@ -145,7 +154,8 @@ class ByakViewModel(private val api: ByakApi, private val billing: BillingManage
 
     fun newConversation(projectId: String? = null, firstMessage: String? = null) = task {
         val provider = state.value.providers.firstOrNull { it.enabled } ?: throw ApiException(NO_PROVIDER, 400)
-        val item = api.createConversation(provider.id, provider.defaultModel, projectId)
+        // A blank model means "use the provider's default", so changing the default in Models fixes every chat.
+        val item = api.createConversation(provider.id, "", projectId)
         update { copy(activeConversation = item, messages = emptyList()) }
         refreshConversations()
         firstMessage?.let { send(it) }

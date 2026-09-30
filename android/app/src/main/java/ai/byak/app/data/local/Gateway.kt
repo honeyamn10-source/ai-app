@@ -69,6 +69,7 @@ class Gateway(private val localModel: LocalModel? = null, private val client: Ok
         val body = runCatching { response.body?.string().orEmpty() }.getOrDefault("")
         val detail = runCatching { JSONObject(body).let { it.optJSONObject("error")?.optString("message") ?: it.optString("message") } }.getOrNull().orEmpty()
         val hint = when {
+            response.code == 402 && label == "OpenRouter" -> "no credits on this OpenRouter key — add credits at openrouter.ai, or pick a model ending in :free (Models → model)"
             response.code == 402 -> "your account at the provider is out of credit"
             response.code == 429 -> "rate limited or out of credit at the provider — wait a moment and retry"
             response.code == 401 || response.code == 403 || (response.code == 400 && detail.contains("API key", true)) -> "the provider rejected your API key (Models → Change key)"
@@ -93,20 +94,35 @@ class Gateway(private val localModel: LocalModel? = null, private val client: Ok
             val data = JSONObject(res.body?.string().orEmpty())
             if (kind(c) == "gemini") data.optJSONArray("models").objects().filter { m -> m.optJSONArray("supportedGenerationMethods")?.let { a -> (0 until a.length()).any { a.getString(it) == "generateContent" } } == true }.map { it.optString("name").removePrefix("models/") }
             else (data.optJSONArray("data") ?: data.optJSONArray("models")).objects().map { it.optString("id").ifBlank { it.optString("name") } }.filter { it.isNotBlank() }.sorted()
-        }.take(300)
+        }.take(3000) // OpenRouter alone lists several hundred; cutting the list hid most of them
     }
+
+    /** What a key can use: its models, and whether it can only run free models (an OpenRouter key with no credits bought). */
+    data class KeyCheck(val models: List<String>, val freeOnly: Boolean = false)
 
     /** Proves the key works. OpenRouter lists models without a key, so it is checked on its key endpoint instead. */
-    suspend fun verify(c: Connection): List<String> = withContext(Dispatchers.IO) {
-        if (c.provider == "openrouter") execute(quick, Request.Builder().url(base(c) + "/key").auth(c).get().build()).use { res -> if (!res.isSuccessful) throw failure(c.name, res) }
-        listModels(c)
+    suspend fun verify(c: Connection): KeyCheck = withContext(Dispatchers.IO) {
+        var freeOnly = false
+        if (c.provider == "openrouter") execute(quick, Request.Builder().url(base(c) + "/key").auth(c).get().build()).use { res ->
+            if (!res.isSuccessful) throw failure(c.name, res)
+            freeOnly = runCatching { JSONObject(res.body?.string().orEmpty()).optJSONObject("data")?.optBoolean("is_free_tier") }.getOrNull() == true
+        }
+        KeyCheck(listModels(c), freeOnly)
     }
 
+    private class InlineSystemRetry : RuntimeException()
+
     /** Streams one answer; [onDelta] receives text as it arrives. Cancelling the coroutine cancels the HTTP call. */
-    suspend fun stream(c: Connection, model: String, system: String, turns: List<Turn>, onDelta: (String) -> Unit): Completion = withContext(Dispatchers.IO) {
+    suspend fun stream(c: Connection, model: String, system: String, turns: List<Turn>, onDelta: (String) -> Unit): Completion = stream(c, model, system, turns, onDelta, inlineSystem = false)
+
+    /** [inlineSystem] puts the instructions inside the first user message, for models that reject a "system" role. */
+    private suspend fun stream(c: Connection, model: String, system: String, turns: List<Turn>, onDelta: (String) -> Unit, inlineSystem: Boolean): Completion = withContext(Dispatchers.IO) {
         if (model.isBlank()) throw ApiException("Choose a model for this provider", 400)
         if (kind(c) == "local") return@withContext (localModel ?: throw ApiException("Offline AI isn't available", 500)).generate(system, turns, onDelta).also { if (it.text.isBlank()) throw ApiException("The offline AI gave an empty answer. Try asking again in different words.", 502) }
-        val merged = merge(turns)
+        val merged = merge(turns).let { list ->
+            if (!inlineSystem || system.isBlank()) list
+            else { val first = list.indexOfFirst { it.role == "user" }; list.mapIndexed { i, t -> if (i == first) t.copy(content = "Instructions:\n$system\n\n---\n\n${t.content}") else t } }
+        }
         val (url, body) = when (kind(c)) {
             "anthropic" -> "${base(c)}/messages" to JSONObject().put("model", model).put("max_tokens", 16000).put("stream", true).apply { if (system.isNotBlank()) put("system", system) }
                 .put("messages", JSONArray(merged.map { t -> JSONObject().put("role", t.role).put("content", if (t.images.isEmpty()) t.content else JSONArray(t.images.map { i -> JSONObject().put("type", "image").put("source", JSONObject().put("type", "base64").put("media_type", i.mimeType).put("data", b64(i))) } + JSONObject().put("type", "text").put("text", t.content.ifBlank { "Describe this image." }))) }))
@@ -114,7 +130,7 @@ class Gateway(private val localModel: LocalModel? = null, private val client: Ok
                 .put("contents", JSONArray(merged.map { t -> JSONObject().put("role", if (t.role == "assistant") "model" else "user").put("parts", JSONArray(t.images.map { i -> JSONObject().put("inline_data", JSONObject().put("mime_type", i.mimeType).put("data", b64(i))) } + JSONObject().put("text", t.content.ifBlank { "Describe this image." }))) }))
                 .apply { if (system.isNotBlank()) put("systemInstruction", JSONObject().put("parts", JSONArray().put(JSONObject().put("text", system)))) }
             else -> "${base(c)}/chat/completions" to JSONObject().put("model", model).put("stream", true).apply { if (Catalog.entry(c.provider)?.usageOption == true) put("stream_options", JSONObject().put("include_usage", true)) }
-                .put("messages", JSONArray((if (system.isNotBlank()) listOf(JSONObject().put("role", "system").put("content", system)) else emptyList()) + merged.map { t ->
+                .put("messages", JSONArray((if (system.isNotBlank() && !inlineSystem) listOf(JSONObject().put("role", "system").put("content", system)) else emptyList()) + merged.map { t ->
                     JSONObject().put("role", t.role).put("content", if (t.images.isEmpty()) t.content else JSONArray(listOf(JSONObject().put("type", "text").put("text", t.content.ifBlank { "Describe this image." })) + t.images.map { i -> JSONObject().put("type", "image_url").put("image_url", JSONObject().put("url", "data:${i.mimeType};base64,${b64(i)}")) }))
                 }))
         }
@@ -122,7 +138,12 @@ class Gateway(private val localModel: LocalModel? = null, private val client: Ok
         var text = ""; var input = 0L; var output = 0L; var stop: String? = null
         val emit = { delta: String -> if (delta.isNotEmpty()) { text += delta; onDelta(delta) } }
         try { execute(client, request).use { res ->
-            if (!res.isSuccessful) throw failure(c.name, res)
+            if (!res.isSuccessful) {
+                val error = failure(c.name, res)
+                // Some models (e.g. Gemma via OpenRouter) refuse a system message: retry once with it inlined.
+                if (kind(c) == "openai" && !inlineSystem && system.isNotBlank() && error.status == 400 && Regex("system|developer|instruction", RegexOption.IGNORE_CASE).containsMatchIn(error.message.orEmpty())) throw InlineSystemRetry()
+                throw error
+            }
             val source = res.body?.source() ?: return@use
             val other = StringBuilder(); var events = 0
             while (true) {
@@ -164,7 +185,9 @@ class Gateway(private val localModel: LocalModel? = null, private val client: Ok
                 }
                 emit(parsed)
             }
-        } } catch (e: IOException) {
+        } } catch (e: InlineSystemRetry) {
+            return@withContext stream(c, model, system, turns, onDelta, inlineSystem = true)
+        } catch (e: IOException) {
             currentCoroutineContext().ensureActive() // a user stop surfaces as cancellation, not as an error
             throw ApiException(if (e is java.net.SocketTimeoutException) "${c.name} stopped responding. Try again." else "The connection to ${c.name} was interrupted. Try again.", 0)
         }
