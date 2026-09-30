@@ -21,7 +21,8 @@ import java.util.concurrent.TimeUnit
 
 /** Provider definitions for on-device mode (mirrors backend/src/providers.mjs). */
 object Catalog {
-    data class Entry(val id: String, val name: String, val baseUrl: String, val kind: String, val models: List<String>, val usageOption: Boolean = false)
+    /** [builtIn]: free, needs no key, connected with one tap (not shown in the Connect dialog). */
+    data class Entry(val id: String, val name: String, val baseUrl: String, val kind: String, val models: List<String>, val usageOption: Boolean = false, val builtIn: Boolean = false)
     val entries = listOf(
         Entry("openai", "OpenAI", "https://api.openai.com/v1", "openai", listOf("gpt-4.1-mini", "gpt-4.1", "o4-mini"), usageOption = true),
         Entry("anthropic", "Anthropic Claude", "https://api.anthropic.com/v1", "anthropic", listOf("claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-4-5")),
@@ -32,9 +33,14 @@ object Catalog {
         Entry("deepseek", "DeepSeek", "https://api.deepseek.com/v1", "openai", listOf("deepseek-chat", "deepseek-reasoner"), usageOption = true),
         Entry("pollinations", "Pollinations", "https://gen.pollinations.ai/v1", "openai", listOf("openai/gpt-5.4-nano", "openai/gpt-4o-mini", "deepseek/deepseek-v4-flash")),
         Entry("nvidia", "NVIDIA", "https://integrate.api.nvidia.com/v1", "openai", listOf("meta/llama-3.3-70b-instruct", "deepseek-ai/deepseek-r1")),
-        Entry(LOCAL, "Offline AI (Qwen3 0.6B)", "", "local", listOf(LocalModel.MODEL_ID))
+        // Anonymous, OpenAI-compatible endpoint (checked live 2026-09-30: works without a key, rate-limited per connection).
+        Entry(POLLINATIONS_FREE, "Pollinations Free (no key)", "https://text.pollinations.ai", "openai", listOf("openai"), builtIn = true),
+        Entry(LOCAL, "Offline AI (Qwen3 0.6B)", "", "local", listOf(LocalModel.MODEL_ID), builtIn = true)
     )
     const val LOCAL = "local"
+    const val POLLINATIONS_FREE = "pollinations-free"
+    /** Providers that need no key. */
+    fun keyless(id: String) = entry(id)?.builtIn == true
     fun entry(id: String): Entry? = entries.firstOrNull { it.id == id }
     /** Keys are often pasted with "Bearer ", quotes, spaces or a line break; none of those are ever part of a key. */
     fun cleanKey(key: String): String = key.trim().removePrefix("Bearer ").removePrefix("bearer ").trim('"', '\'', ' ').filterNot { it.isWhitespace() }
@@ -45,7 +51,7 @@ object Catalog {
         k.startsWith("sk-ant-") -> "anthropic"; k.startsWith("AIza") -> "gemini"; k.startsWith("sk-or-") -> "openrouter"
         k.startsWith("gsk_") -> "groq"; k.startsWith("nvapi-") -> "nvidia"; k.startsWith("sk_") || k.startsWith("pk_") -> "pollinations"; k.startsWith("sk-proj-") || k.startsWith("sk-svcacct-") -> "openai"
         else -> null } }
-    fun asCatalog(): List<CatalogProvider> = entries.map { CatalogProvider(it.id, it.name, it.models, localOnly = it.kind == "local", keyOptional = it.kind == "local") }
+    fun asCatalog(): List<CatalogProvider> = entries.map { CatalogProvider(it.id, it.name, it.models, localOnly = it.builtIn, keyOptional = it.builtIn) }
 }
 
 data class Connection(val provider: String, val name: String, val baseUrl: String, val apiKey: String)
@@ -63,7 +69,7 @@ class Gateway(private val localModel: LocalModel? = null, private val client: Ok
     private fun Request.Builder.auth(c: Connection): Request.Builder = when (kind(c)) {
         "anthropic" -> header("x-api-key", c.apiKey).header("anthropic-version", "2023-06-01")
         "gemini" -> header("x-goog-api-key", c.apiKey)
-        else -> apply { if (c.apiKey.isNotBlank()) header("Authorization", "Bearer ${c.apiKey}"); if (c.provider == "openrouter") header("X-Title", "BYAK AI") }
+        else -> apply { if (c.apiKey.isNotBlank()) header("Authorization", "Bearer ${c.apiKey}"); if (c.provider == "openrouter") header("X-Title", "BYAK AI"); if (c.provider == Catalog.POLLINATIONS_FREE) header("Referer", "https://honeyamn10-source.github.io/honeyamn10-source/byak-ai/") }
     }
 
     /** OpenRouter by id, or a "Custom" provider pointed at openrouter.ai. */
@@ -76,6 +82,7 @@ class Gateway(private val localModel: LocalModel? = null, private val client: Ok
             // Free OpenRouter models are hidden unless the account allows free-model data sharing.
             detail.contains("data policy", true) -> "your OpenRouter privacy settings block this model — open openrouter.ai/settings/privacy and allow free model endpoints, or pick a paid model"
             response.code == 429 && openRouter && detail.contains("free", true) -> "today's free OpenRouter limit is used up (about 50 free messages a day without credits) — add \$10 of credits to raise it, or try tomorrow"
+            (response.code == 402 || response.code == 429) && label.startsWith("Pollinations Free") -> "the free Pollinations limit for your connection is used up for now — wait a few minutes, use Offline AI, or add a free key from enter.pollinations.ai"
             response.code == 402 && label == "Pollinations" -> "no pollen left on this Pollinations key — top up at enter.pollinations.ai, or pick a cheaper model"
             response.code == 402 && openRouter -> "this model costs credits and the key has none — choose a model ending in :free, or add credits at openrouter.ai"
             response.code == 402 -> "your account at the provider is out of credit"
@@ -98,6 +105,7 @@ class Gateway(private val localModel: LocalModel? = null, private val client: Ok
 
     suspend fun listModels(c: Connection): List<String> = withContext(Dispatchers.IO) {
         if (kind(c) == "local") return@withContext listOf(LocalModel.MODEL_ID)
+        if (c.provider == Catalog.POLLINATIONS_FREE) return@withContext listOf("openai") // the anonymous endpoint serves one model
         // Anthropic returns 20 models per page by default; ask for all of them.
         val path = when (kind(c)) { "gemini" -> "/models?pageSize=200"; "anthropic" -> "/models?limit=1000"; else -> "/models" }
         execute(quick, Request.Builder().url(base(c) + path).auth(c).get().build()).use { res ->
@@ -144,7 +152,7 @@ class Gateway(private val localModel: LocalModel? = null, private val client: Ok
             "gemini" -> "${base(c)}/models/${java.net.URLEncoder.encode(model, "UTF-8")}:streamGenerateContent?alt=sse" to JSONObject()
                 .put("contents", JSONArray(merged.map { t -> JSONObject().put("role", if (t.role == "assistant") "model" else "user").put("parts", JSONArray(t.images.map { i -> JSONObject().put("inline_data", JSONObject().put("mime_type", i.mimeType).put("data", b64(i))) } + JSONObject().put("text", t.content.ifBlank { "Describe this image." }))) }))
                 .apply { if (system.isNotBlank()) put("systemInstruction", JSONObject().put("parts", JSONArray().put(JSONObject().put("text", system)))) }
-            else -> "${base(c)}/chat/completions" to JSONObject().put("model", model).put("stream", true).apply {
+            else -> (if (c.provider == Catalog.POLLINATIONS_FREE) "${base(c)}/openai" else "${base(c)}/chat/completions") to JSONObject().put("model", model).put("stream", true).apply {
                     // OpenRouter uses its own usage flag; some of the providers behind it reject OpenAI's stream_options.
                     if (isOpenRouter(c)) put("usage", JSONObject().put("include", true))
                     else if (Catalog.entry(c.provider)?.usageOption == true) put("stream_options", JSONObject().put("include_usage", true))

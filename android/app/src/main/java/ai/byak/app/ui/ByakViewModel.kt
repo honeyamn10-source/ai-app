@@ -138,6 +138,11 @@ class ByakViewModel(private val api: ByakApi, private val billing: BillingManage
         state.value.providers.filter { it.provider == Catalog.LOCAL }.forEach { api.deleteProvider(it.id) }
         val list = api.providers(); update { copy(providers = list, localModel = model.state()) }
     }
+    /** Free online AI with no key (Pollinations' anonymous endpoint); limited per connection. */
+    fun usePollinationsFree(startChat: Boolean = false) = task("Pollinations Free connected. It's free but limited; add a key for heavy use.") {
+        api.addProvider(Catalog.POLLINATIONS_FREE, "", "openai", ""); val list = api.providers(); update { copy(providers = list) }
+        if (startChat) newConversation()
+    }
     fun useLocalModel() = task("Offline AI connected — start a chat") { api.addProvider(Catalog.LOCAL, "", LocalModel.MODEL_ID, ""); val list = api.providers(); update { copy(providers = list) } }
 
     fun loadModels(providerId: String) = viewModelScope.launch {
@@ -211,7 +216,7 @@ class ByakViewModel(private val api: ByakApi, private val billing: BillingManage
         }
         val images = state.value.drafts
         // The offline model reads text only: stop here so no photo allowance is used and the photo stays attached.
-        if (images.isNotEmpty() && provider.provider == Catalog.LOCAL) { update { copy(error = "Offline AI can't see photos. Tap the model name at the top and pick a model with an API key, or remove the photo.", composerPrefill = text) }; return }
+        if (images.isNotEmpty() && Catalog.keyless(provider.provider)) { update { copy(error = "${provider.name} can't see photos. Tap the model name at the top and pick a model with an API key, or remove the photo.", composerPrefill = text) }; return }
         val local = ChatMessage("local-user-${System.nanoTime()}", "user", text, localImages = images)
         update { copy(drafts = emptyList()) }
         streamInto(conversation, listOf(local)) { api.streamMessage(conversation.id, text, provider.id, model, images, web) }

@@ -113,8 +113,8 @@ class LocalApi(
         val key = Catalog.cleanKey(apiKey); val base = Catalog.cleanBaseUrl(baseUrl)
         val entry = Catalog.entry(type)
         if (entry == null && type != "custom") throw ApiException("Unsupported provider", 400)
-        val local = type == Catalog.LOCAL
-        if (local) providers().firstOrNull { it.provider == Catalog.LOCAL }?.let { existing -> return if (existing.enabled) existing else updateProvider(existing.id, null, true, null) }
+        val local = Catalog.keyless(type) // Offline AI and Pollinations Free need no key
+        if (local) providers().firstOrNull { it.provider == type }?.let { existing -> return if (existing.enabled) existing else updateProvider(existing.id, null, true, null) }
         if (key.isBlank() && !local) throw ApiException("Paste your API key", 400)
         if (type == "custom" && !base.startsWith("https://")) throw ApiException("Custom providers need an https:// endpoint", 400)
         Catalog.detect(key)?.takeIf { it != type && type != "custom" && !(it == "openai" && type in setOf("openrouter", "deepseek")) }?.let { guess ->
@@ -122,7 +122,7 @@ class LocalApi(
         }
         // Pasting a new key for a provider that is already connected replaces that key instead of adding a second connection.
         val existing = store.read { db -> db.all("providers").firstOrNull { sameConnection(it, type, base) }?.let { JSONObject(it.toString()) } }
-        if (existing == null) enforce("providers", providers().count { it.provider != Catalog.LOCAL }) // the free offline AI never uses a provider slot
+        if (existing == null && !local) enforce("providers", providers().count { !Catalog.keyless(it.provider) }) // free built-ins never use a provider slot
         var chosen = model.ifBlank { entry?.models?.firstOrNull().orEmpty() }
         var verified = false; var freeOnly = false
         if (!local) {
@@ -147,7 +147,7 @@ class LocalApi(
             } ?: throw ApiException("Not found", 404)).toProvider()
         }
         return store.write { db -> db.insert("providers", JSONObject().put("provider", type).put("name", entry?.name ?: "Custom provider").put("baseUrl", if (type == "custom") base else "")
-            .put("defaultModel", chosen).put("enabled", true).put("maskedKey", if (local) "On this phone · no key" else mask(key)).put("secret", if (local) "" else vault.encrypt(key))
+            .put("defaultModel", chosen).put("enabled", true).put("maskedKey", if (type == Catalog.LOCAL) "On this phone · no key" else if (local) "Free · no key needed" else mask(key)).put("secret", if (local) "" else vault.encrypt(key))
             .put("freeOnly", freeOnly).put("preferredAt", now).apply { if (verified) put("lastValidatedAt", now) }).toProvider() }
     }
     override suspend fun updateProvider(id: String, defaultModel: String?, enabled: Boolean?, apiKey: String?): Provider {
@@ -163,7 +163,7 @@ class LocalApi(
     private suspend fun resolve(id: String?): Pair<Connection, JSONObject> {
         val row = store.read { db -> (id?.let { db.find("providers", it) } ?: db.all("providers").firstOrNull { it.optBoolean("enabled", true) })?.let { JSONObject(it.toString()) } } ?: throw ApiException("Connect an AI provider first", 400)
         if (!row.optBoolean("enabled", true)) throw ApiException("This provider connection is disabled", 400)
-        val key = if (row.optString("provider") == Catalog.LOCAL) "" else runCatching { vault.decrypt(row.getString("secret")) }.getOrElse { throw ApiException("This key can't be read on this phone any more — remove the provider and add it again.", 400) }
+        val key = if (Catalog.keyless(row.optString("provider"))) "" else runCatching { vault.decrypt(row.getString("secret")) }.getOrElse { throw ApiException("This key can't be read on this phone any more — remove the provider and add it again.", 400) }
         return Connection(row.getString("provider"), row.getString("name"), row.optString("baseUrl"), key) to row
     }
     private suspend fun connection(id: String?): Connection = resolve(id).first

@@ -55,14 +55,12 @@ import kotlinx.coroutines.withContext
         }
         // No AI yet: the free option is one tap away (no key, no account, no cost).
         if (state.providers.none { it.enabled } && vm.offlineAvailable) item {
-            OutlinedCard(onClick = { vm.downloadLocalModel(); navigate(Destination.Models) }, shape = RoundedCornerShape(24.dp)) {
-                Row(Modifier.padding(20.dp).fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Outlined.PhoneAndroid, null, tint = MaterialTheme.colorScheme.primary); Spacer(Modifier.width(14.dp))
-                    Column(Modifier.weight(1f)) {
-                        Text("Start free — no key needed", fontWeight = FontWeight.Bold)
-                        Text("Download the Offline AI once (${LocalModel.SIZE_LABEL}). Private, and works without internet.", style = MaterialTheme.typography.bodySmall)
-                    }
-                    Icon(Icons.Outlined.Download, null)
+            OutlinedCard(shape = RoundedCornerShape(24.dp)) {
+                Column(Modifier.padding(20.dp).fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text("Start free — no key needed", fontWeight = FontWeight.Bold)
+                    Button(onClick = { vm.usePollinationsFree(startChat = true); navigate(Destination.Chats) }, modifier = Modifier.fillMaxWidth(), enabled = !state.busy) { Icon(Icons.Outlined.Bolt, null); Text("  Chat now (online, free)") }
+                    OutlinedButton(onClick = { vm.downloadLocalModel(); navigate(Destination.Models) }, modifier = Modifier.fillMaxWidth()) { Icon(Icons.Outlined.Download, null); Text("  Offline AI (${LocalModel.SIZE_LABEL}, private)") }
+                    Text("Free online AI is limited. For more, add a key from OpenAI, Gemini, OpenRouter and others in Models.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
         }
@@ -227,6 +225,14 @@ fun formatBytes(bytes: Long): String = when { bytes < 1024 -> "$bytes B"; bytes 
             }
         }
         if (vm.offlineAvailable) item { OfflineAiCard(state, vm) }
+        if (vm.isLocal && state.providers.none { it.provider == Catalog.POLLINATIONS_FREE }) item {
+            OutlinedCard {
+                ListItem(headlineContent = { Text("Pollinations Free", fontWeight = FontWeight.Bold) },
+                    supportingContent = { Text("Online AI with no key and no sign-up. Free but limited — for heavy use add your own key.") },
+                    leadingContent = { Icon(Icons.Outlined.Bolt, null, tint = MaterialTheme.colorScheme.primary) },
+                    trailingContent = { Button(onClick = { vm.usePollinationsFree() }, enabled = !state.busy) { Text("Use") } })
+            }
+        }
         if (state.providers.isEmpty()) item { EmptyState(Icons.Outlined.Key, "Bring your API key", "OpenAI, Claude, Gemini, OpenRouter, Groq, Mistral, DeepSeek, NVIDIA, Pollinations or any OpenAI-compatible HTTPS endpoint. Or use the free Offline AI above — no key needed.") }
         items(state.providers, key = { it.id }) { p ->
             Card {
@@ -241,7 +247,7 @@ fun formatBytes(bytes: Long): String = when { bytes < 1024 -> "$bytes B"; bytes 
                     Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
                         if (p.lastValidatedAt != null) { Icon(Icons.Outlined.CheckCircle, "Verified", tint = MaterialTheme.colorScheme.secondary, modifier = Modifier.size(18.dp)); Text(" Verified", style = MaterialTheme.typography.labelSmall) }
                         Spacer(Modifier.weight(1f))
-                        if (p.provider != Catalog.LOCAL) {
+                        if (!Catalog.keyless(p.provider)) {
                             TextButton(onClick = { vm.validateProvider(p.id) }) { Text("Test", maxLines = 1) }
                             TextButton(onClick = { rekeying = p }) { Text("Change key", maxLines = 1) }
                         }
