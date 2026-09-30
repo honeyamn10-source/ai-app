@@ -264,6 +264,7 @@ class ByakViewModel(private val api: ByakApi, private val billing: BillingManage
                     runCatching { api.messages(conversation.id) }.onSuccess { list -> if (state.value.activeConversation?.id == conversation.id) update { copy(messages = list + listOfNotNull(errorBubble)) } }
                         .onFailure { if (errorBubble != null) update { copy(messages = messages.filterNot { it.pending } + errorBubble) } }
                     runCatching { refreshConversations() }
+                    runCatching { api.providers() }.onSuccess { list -> update { copy(providers = list) } } // picks up an automatic model switch
                     runCatching { api.subscription() }.onSuccess { sub -> update { copy(subscription = sub) } } // refresh "N left today"
                 }
             }

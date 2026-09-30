@@ -27,6 +27,7 @@ class OfflineAiTest {
         assertEquals("groq", Catalog.detect("gsk_abc"))
         assertEquals("nvidia", Catalog.detect("nvapi-abc"))
         assertEquals("openai", Catalog.detect("sk-proj-abc"))
+        assertEquals("pollinations", Catalog.detect("sk_abc123"))
         assertNull(Catalog.detect("sk-abc")) // plain sk- keys are shared by several providers
     }
 

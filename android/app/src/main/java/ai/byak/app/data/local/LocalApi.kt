@@ -103,7 +103,7 @@ class LocalApi(
         }
         enforce("providers", providers().count { it.provider != Catalog.LOCAL }) // the free offline AI never uses a provider slot
         var chosen = model.ifBlank { entry?.models?.firstOrNull().orEmpty() }
-        var verified = false
+        var verified = false; var freeOnly = false
         if (!local) {
             // Test the key now, so a wrong key fails here instead of as a silent chat later.
             val check = try { gateway.verify(Connection(type, entry?.name ?: "Custom provider", base, key)) }
@@ -111,13 +111,13 @@ class LocalApi(
             catch (e: CancellationException) { throw e }
             catch (e: Exception) { null } // an unusual /models response doesn't block saving the key
             if (check != null && check.models.isNotEmpty()) {
-                verified = true
+                verified = true; freeOnly = check.freeOnly
                 chosen = pickModel(model.trim(), entry?.models.orEmpty(), check)
             }
         }
         return store.write { db -> db.insert("providers", JSONObject().put("provider", type).put("name", entry?.name ?: "Custom provider").put("baseUrl", if (type == "custom") base else "")
             .put("defaultModel", chosen).put("enabled", true).put("maskedKey", if (local) "On this phone · no key" else mask(key)).put("secret", if (local) "" else vault.encrypt(key))
-            .apply { if (verified) put("lastValidatedAt", Instant.now().toString()) }).toProvider() }
+            .put("freeOnly", freeOnly).apply { if (verified) put("lastValidatedAt", Instant.now().toString()) }).toProvider() }
     }
     override suspend fun updateProvider(id: String, defaultModel: String?, enabled: Boolean?, apiKey: String?): Provider {
         val key = apiKey?.let(Catalog::cleanKey)?.also { if (it.isBlank()) throw ApiException("Paste your API key", 400) }
@@ -136,7 +136,15 @@ class LocalApi(
         return Connection(row.getString("provider"), row.getString("name"), row.optString("baseUrl"), key) to row
     }
     private suspend fun connection(id: String?): Connection = resolve(id).first
-    override suspend fun validateProvider(id: String) { val c = connection(id); gateway.verify(c); store.write { db -> db.update("providers", id) { it.put("lastValidatedAt", Instant.now().toString()) } } }
+    /** Tests the key and, if the saved model no longer suits it (gone, or paid on a free-only key), picks one that does. */
+    override suspend fun validateProvider(id: String) {
+        val (c, row) = resolve(id)
+        val check = gateway.verify(c)
+        val current = row.optString("defaultModel")
+        val fixed = if (check.models.isNotEmpty()) pickModel(current, Catalog.entry(c.provider)?.models.orEmpty(), check) else current
+        if (fixed != current) updateProvider(id, defaultModel = fixed)
+        store.write { db -> db.update("providers", id) { it.put("lastValidatedAt", Instant.now().toString()).put("freeOnly", check.freeOnly) } }
+    }
     override suspend fun providerModels(id: String): List<String> {
         val c = connection(id)
         val models = runCatching { gateway.listModels(c) }.getOrElse { Catalog.entry(c.provider)?.models ?: throw it }
@@ -221,7 +229,7 @@ class LocalApi(
         val (c, providerRow) = resolve(providerId ?: conversation.optString("providerId").ifBlank { null })
         val project = store.read { db -> conversation.optString("projectId").ifBlank { null }?.let { db.find("projects", it) }?.let { JSONObject(it.toString()) } }
         val sameProvider = conversation.optString("providerId") == providerRow.optString("id")
-        val model = requestedModel?.ifBlank { null } ?: conversation.optString("model").ifBlank { null }?.takeIf { sameProvider } ?: project?.optString("preferredModel")?.ifBlank { null } ?: providerRow.optString("defaultModel")
+        var model = requestedModel?.ifBlank { null } ?: conversation.optString("model").ifBlank { null }?.takeIf { sameProvider } ?: project?.optString("preferredModel")?.ifBlank { null } ?: providerRow.optString("defaultModel")
         val (history, question) = store.read { db ->
             val all = db.all("messages").filter { it.optString("conversationId") == conversationId }.takeLast(limits.getValue("historyMessages"))
             all.map { m ->
@@ -269,7 +277,19 @@ class LocalApi(
             row.toMessage()
         }
         try {
-            val result = gateway.stream(c, model, system, history) { delta -> partial += delta; send(StreamEvent.Delta(delta)) }
+            val result = try { gateway.stream(c, model, system, history) { delta -> partial += delta; send(StreamEvent.Delta(delta)) } }
+            catch (e: ApiException) {
+                // The model was retired or renamed (common for free OpenRouter models): switch to one that exists and retry once.
+                if (e.code != Gateway.MODEL_UNAVAILABLE || partial.isNotEmpty()) throw e
+                val check = runCatching { Gateway.KeyCheck(gateway.listModels(c), providerRow.optBoolean("freeOnly")) }.getOrNull() ?: throw e
+                val replacement = pickModel("", Catalog.entry(c.provider)?.models.orEmpty(), check).takeIf { it != model && it in check.models } ?: throw e
+                send(StreamEvent.Status("$model is no longer available — switching to $replacement…"))
+                val retired = model
+                updateProvider(providerRow.getString("id"), defaultModel = replacement)
+                store.write { db -> db.update("conversations", conversationId) { if (it.optString("model") == retired) it.put("model", "") } }
+                model = replacement
+                gateway.stream(c, model, system, history) { delta -> partial += delta; send(StreamEvent.Delta(delta)) }
+            }
             send(StreamEvent.Complete(save(result.text, "complete", result.inputTokens, result.outputTokens)))
         } catch (e: CancellationException) {
             if (partial.isNotEmpty()) kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) { save(partial, "stopped", 0, 0) }

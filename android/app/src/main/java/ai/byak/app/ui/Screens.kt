@@ -227,7 +227,7 @@ fun formatBytes(bytes: Long): String = when { bytes < 1024 -> "$bytes B"; bytes 
             }
         }
         if (vm.offlineAvailable) item { OfflineAiCard(state, vm) }
-        if (state.providers.isEmpty()) item { EmptyState(Icons.Outlined.Key, "Bring your API key", "OpenAI, Claude, Gemini, OpenRouter, Groq, Mistral, DeepSeek, NVIDIA or any OpenAI-compatible HTTPS endpoint. Or use the free Offline AI above — no key needed.") }
+        if (state.providers.isEmpty()) item { EmptyState(Icons.Outlined.Key, "Bring your API key", "OpenAI, Claude, Gemini, OpenRouter, Groq, Mistral, DeepSeek, NVIDIA, Pollinations or any OpenAI-compatible HTTPS endpoint. Or use the free Offline AI above — no key needed.") }
         items(state.providers, key = { it.id }) { p ->
             Card {
                 Column(Modifier.padding(16.dp)) {
@@ -339,6 +339,7 @@ fun formatBytes(bytes: Long): String = when { bytes < 1024 -> "$bytes B"; bytes 
                 if (suggestions.isNotEmpty()) FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) { suggestions.forEach { s -> SuggestionChip(onClick = { model = s }, label = { Text(s) }) } }
                 if (type == "custom") OutlinedTextField(base, { base = it }, label = { Text("HTTPS endpoint (OpenAI-compatible)") }, singleLine = true, placeholder = { Text("https://example.com/v1") })
                 Text("The key is tested before it's saved, then encrypted on this phone. You can pick any model the provider offers later.", style = MaterialTheme.typography.bodySmall)
+                Text("Free keys: Google Gemini (aistudio.google.com), Groq (console.groq.com), OpenRouter free models (openrouter.ai), Pollinations (enter.pollinations.ai).", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         })
 }
