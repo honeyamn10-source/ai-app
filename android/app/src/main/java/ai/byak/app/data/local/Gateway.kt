@@ -30,6 +30,7 @@ object Catalog {
         Entry("groq", "Groq", "https://api.groq.com/openai/v1", "openai", listOf("llama-3.3-70b-versatile"), usageOption = true),
         Entry("mistral", "Mistral", "https://api.mistral.ai/v1", "openai", listOf("mistral-small-latest", "mistral-large-latest")),
         Entry("deepseek", "DeepSeek", "https://api.deepseek.com/v1", "openai", listOf("deepseek-chat", "deepseek-reasoner"), usageOption = true),
+        Entry("pollinations", "Pollinations", "https://gen.pollinations.ai/v1", "openai", listOf("openai/gpt-5.4-nano", "openai/gpt-4o-mini", "deepseek/deepseek-v4-flash")),
         Entry("nvidia", "NVIDIA", "https://integrate.api.nvidia.com/v1", "openai", listOf("meta/llama-3.3-70b-instruct", "deepseek-ai/deepseek-r1")),
         Entry(LOCAL, "Offline AI (Qwen3 0.6B)", "", "local", listOf(LocalModel.MODEL_ID))
     )
@@ -42,7 +43,7 @@ object Catalog {
     /** Guesses the provider from a pasted key's prefix, so a Gemini key never gets sent to OpenAI. */
     fun detect(key: String): String? = key.trim().let { k -> when {
         k.startsWith("sk-ant-") -> "anthropic"; k.startsWith("AIza") -> "gemini"; k.startsWith("sk-or-") -> "openrouter"
-        k.startsWith("gsk_") -> "groq"; k.startsWith("nvapi-") -> "nvidia"; k.startsWith("sk-proj-") || k.startsWith("sk-svcacct-") -> "openai"
+        k.startsWith("gsk_") -> "groq"; k.startsWith("nvapi-") -> "nvidia"; k.startsWith("sk_") || k.startsWith("pk_") -> "pollinations"; k.startsWith("sk-proj-") || k.startsWith("sk-svcacct-") -> "openai"
         else -> null } }
     fun asCatalog(): List<CatalogProvider> = entries.map { CatalogProvider(it.id, it.name, it.models, localOnly = it.kind == "local", keyOptional = it.kind == "local") }
 }
@@ -69,6 +70,10 @@ class Gateway(private val localModel: LocalModel? = null, private val client: Ok
         val body = runCatching { response.body?.string().orEmpty() }.getOrDefault("")
         val detail = runCatching { JSONObject(body).let { it.optJSONObject("error")?.optString("message") ?: it.optString("message") } }.getOrNull().orEmpty()
         val hint = when {
+            // Free OpenRouter models are hidden unless the account allows free-model data sharing.
+            detail.contains("data policy", true) -> "your OpenRouter privacy settings block this model — open openrouter.ai/settings/privacy and allow free model endpoints, or pick a paid model"
+            response.code == 429 && label == "OpenRouter" && detail.contains("free", true) -> "today's free OpenRouter limit is used up (about 50 free messages a day without credits) — add \$10 of credits to raise it, or try tomorrow"
+            response.code == 402 && label == "Pollinations" -> "no pollen left on this Pollinations key — top up at enter.pollinations.ai, or pick a cheaper model"
             response.code == 402 && label == "OpenRouter" -> "no credits on this OpenRouter key — add credits at openrouter.ai, or pick a model ending in :free (Models → model)"
             response.code == 402 -> "your account at the provider is out of credit"
             response.code == 429 -> "rate limited or out of credit at the provider — wait a moment and retry"
@@ -77,7 +82,9 @@ class Gateway(private val localModel: LocalModel? = null, private val client: Ok
             response.code >= 500 -> "the provider is having problems (error ${response.code}) — try again shortly"
             else -> "error ${response.code}"
         }
-        return ApiException("$label: $hint${if (detail.isNotBlank()) " — ${detail.take(300)}" else ""}", response.code)
+        // Marked so a chat can switch to a model that still exists instead of failing every time.
+        val gone = !detail.contains("data policy", true) && (response.code == 404 || (response.code == 400 && Regex("not a valid model|model_not_found|does not exist|no endpoints found|unknown model|invalid model", RegexOption.IGNORE_CASE).containsMatchIn(detail)))
+        return ApiException("$label: $hint${if (detail.isNotBlank()) " — ${detail.take(300)}" else ""}", response.code, if (gone) MODEL_UNAVAILABLE else null)
     }
 
     private suspend fun execute(http: OkHttpClient, request: Request): Response = withContext(Dispatchers.IO) {
@@ -111,6 +118,7 @@ class Gateway(private val localModel: LocalModel? = null, private val client: Ok
     }
 
     private class InlineSystemRetry : RuntimeException()
+    companion object { const val MODEL_UNAVAILABLE = "model_unavailable" }
 
     /** Streams one answer; [onDelta] receives text as it arrives. Cancelling the coroutine cancels the HTTP call. */
     suspend fun stream(c: Connection, model: String, system: String, turns: List<Turn>, onDelta: (String) -> Unit): Completion = stream(c, model, system, turns, onDelta, inlineSystem = false)
