@@ -69,10 +69,10 @@ class Gateway(private val localModel: LocalModel? = null, private val client: Ok
         val body = runCatching { response.body?.string().orEmpty() }.getOrDefault("")
         val detail = runCatching { JSONObject(body).let { it.optJSONObject("error")?.optString("message") ?: it.optString("message") } }.getOrNull().orEmpty()
         val hint = when {
-            response.code == 401 || response.code == 403 || detail.contains("API key", true) -> "the provider rejected your API key (Models → Change key)"
             response.code == 402 -> "your account at the provider is out of credit"
-            response.code == 404 -> "this model isn't available with your key — pick another in Models"
             response.code == 429 -> "rate limited or out of credit at the provider — wait a moment and retry"
+            response.code == 401 || response.code == 403 || (response.code == 400 && detail.contains("API key", true)) -> "the provider rejected your API key (Models → Change key)"
+            response.code == 404 -> "this model isn't available with your key — pick another in Models"
             response.code >= 500 -> "the provider is having problems (error ${response.code}) — try again shortly"
             else -> "error ${response.code}"
         }
