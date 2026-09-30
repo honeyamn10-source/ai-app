@@ -32,6 +32,8 @@ class OfflineAiTest {
     }
 
     @Test fun offlineModelIsInTheCatalogWithoutAKey() {
+        val free = Catalog.asCatalog().single { it.id == Catalog.POLLINATIONS_FREE }
+        assertTrue(free.keyOptional && free.localOnly && Catalog.keyless(Catalog.POLLINATIONS_FREE) && !Catalog.keyless("openrouter"))
         val local = Catalog.asCatalog().single { it.id == Catalog.LOCAL }
         assertTrue(local.localOnly && local.keyOptional)
         assertEquals(listOf("claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-4-5"), Catalog.entry("anthropic")!!.models)

@@ -34,8 +34,13 @@ data class UiState(
     // compare
     val comparing: Boolean = false, val comparison: List<ComparisonResult> = emptyList(), val comparisonQuestion: String = "",
     // offline AI
-    val localModel: LocalModelState? = null, val providerError: String? = null
+    val localModel: LocalModelState? = null, val providerError: String? = null,
+    // Connect screen: live check of the pasted key, and model-list errors per provider
+    val keyCheck: KeyCheckState? = null, val modelErrors: Map<String, String> = emptyMap()
 )
+
+/** Result of testing a pasted key before saving it. [suggested] is a model this key can actually use. */
+data class KeyCheckState(val key: String, val loading: Boolean, val models: List<String> = emptyList(), val freeOnly: Boolean = false, val suggested: String? = null, val error: String? = null)
 
 class ByakViewModel(private val api: ByakApi, private val billing: BillingManager, private val localModel: LocalModel? = null) : ViewModel() {
     /** True when BYAK runs entirely on this phone (no server). */
@@ -133,13 +138,35 @@ class ByakViewModel(private val api: ByakApi, private val billing: BillingManage
         state.value.providers.filter { it.provider == Catalog.LOCAL }.forEach { api.deleteProvider(it.id) }
         val list = api.providers(); update { copy(providers = list, localModel = model.state()) }
     }
+    /** Free online AI with no key (Pollinations' anonymous endpoint); limited per connection. */
+    fun usePollinationsFree(startChat: Boolean = false) = task("Pollinations Free connected. It's free but limited; add a key for heavy use.") {
+        api.addProvider(Catalog.POLLINATIONS_FREE, "", "openai", ""); val list = api.providers(); update { copy(providers = list) }
+        if (startChat) newConversation()
+    }
     fun useLocalModel() = task("Offline AI connected — start a chat") { api.addProvider(Catalog.LOCAL, "", LocalModel.MODEL_ID, ""); val list = api.providers(); update { copy(providers = list) } }
 
     fun loadModels(providerId: String) = viewModelScope.launch {
-        if (state.value.modelOptions.containsKey(providerId)) return@launch
-        val models = runCatching { api.providerModels(providerId) }.getOrElse { emptyList() }
-        update { copy(modelOptions = modelOptions + (providerId to models)) }
+        if (!state.value.modelOptions[providerId].isNullOrEmpty()) return@launch
+        runCatching { api.providerModels(providerId) }
+            .onSuccess { models -> update { copy(modelOptions = modelOptions + (providerId to models), modelErrors = modelErrors - providerId) } }
+            .onFailure { e -> update { copy(modelErrors = modelErrors + (providerId to (e.message ?: "Couldn't load the model list"))) } } // not cached: opening again retries
     }
+
+    private var keyCheckJob: Job? = null
+    /** Tests a pasted key right away and loads the models it can use, so the user picks a working one before saving. */
+    fun checkKey(type: String, key: String, baseUrl: String) {
+        val local = api as? LocalApi ?: return
+        keyCheckJob?.cancel()
+        update { copy(keyCheck = KeyCheckState(key, loading = true)) }
+        keyCheckJob = viewModelScope.launch {
+            try {
+                val (check, suggested) = local.previewKey(type, key, baseUrl)
+                update { copy(keyCheck = KeyCheckState(key, false, check.models, check.freeOnly, suggested)) }
+            } catch (e: CancellationException) { throw e }
+            catch (e: Exception) { update { copy(keyCheck = KeyCheckState(key, false, error = e.message ?: "Couldn't check this key")) } }
+        }
+    }
+    fun clearKeyCheck() { keyCheckJob?.cancel(); update { copy(keyCheck = null) } }
 
     // ---------- conversations ----------
     fun searchConversations(query: String) {
@@ -189,7 +216,7 @@ class ByakViewModel(private val api: ByakApi, private val billing: BillingManage
         }
         val images = state.value.drafts
         // The offline model reads text only: stop here so no photo allowance is used and the photo stays attached.
-        if (images.isNotEmpty() && provider.provider == Catalog.LOCAL) { update { copy(error = "Offline AI can't see photos. Tap the model name at the top and pick a model with an API key, or remove the photo.", composerPrefill = text) }; return }
+        if (images.isNotEmpty() && Catalog.keyless(provider.provider)) { update { copy(error = "${provider.name} can't see photos. Tap the model name at the top and pick a model with an API key, or remove the photo.", composerPrefill = text) }; return }
         val local = ChatMessage("local-user-${System.nanoTime()}", "user", text, localImages = images)
         update { copy(drafts = emptyList()) }
         streamInto(conversation, listOf(local)) { api.streamMessage(conversation.id, text, provider.id, model, images, web) }

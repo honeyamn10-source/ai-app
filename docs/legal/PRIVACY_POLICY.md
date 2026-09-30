@@ -145,7 +145,8 @@ Providers the app can be configured to call:
 | Mistral AI | `api.mistral.ai` |
 | DeepSeek | `api.deepseek.com` |
 | NVIDIA | `integrate.api.nvidia.com` |
-| Pollinations | `gen.pollinations.ai` |
+| Pollinations (with your key) | `gen.pollinations.ai` |
+| Pollinations Free (no key, if you turn it on) | `text.pollinations.ai` |
 | Any custom OpenAI-compatible endpoint you enter | as you specify |
 
 **Cost and terms.** These providers bill you directly through your own API key. BYAK AI does not
