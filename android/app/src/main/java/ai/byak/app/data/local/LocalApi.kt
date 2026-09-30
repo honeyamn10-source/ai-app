@@ -176,10 +176,15 @@ class LocalApi(
         if (fixed != current) updateProvider(id, defaultModel = fixed)
         store.write { db -> db.update("providers", id) { it.put("lastValidatedAt", Instant.now().toString()).put("freeOnly", check.freeOnly) } }
     }
-    override suspend fun providerModels(id: String): List<String> {
-        val c = connection(id)
-        val models = runCatching { gateway.listModels(c) }.getOrElse { Catalog.entry(c.provider)?.models ?: throw it }
-        return if (c.provider == "openrouter") models.sortedBy { !it.endsWith(":free") } else models // free models first
+    /** The provider's real model list, free ones first. Errors are reported, never replaced by a few built-in names. */
+    override suspend fun providerModels(id: String): List<String> = gateway.listModels(connection(id)).sortedBy { !it.endsWith(":free") }
+
+    /** Checks a key before it is saved (Connect screen): does it work, which models can it use, is it free-only. */
+    suspend fun previewKey(type: String, apiKey: String, baseUrl: String): Pair<Gateway.KeyCheck, String> {
+        val entry = Catalog.entry(type)
+        val check = gateway.verify(Connection(type, entry?.name ?: "Custom provider", Catalog.cleanBaseUrl(baseUrl), Catalog.cleanKey(apiKey)))
+        val sorted = check.copy(models = check.models.sortedBy { !it.endsWith(":free") })
+        return sorted to pickModel("", entry?.models.orEmpty(), sorted)
     }
     override suspend fun deleteProvider(id: String) { store.write { db -> db.remove("providers") { it.optString("id") == id }; db.all("conversations").filter { it.optString("providerId") == id }.forEach { c -> db.update("conversations", c.getString("id")) { it.remove("providerId") } } } }
 

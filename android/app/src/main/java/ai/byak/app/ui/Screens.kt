@@ -251,7 +251,7 @@ fun formatBytes(bytes: Long): String = when { bytes < 1024 -> "$bytes B"; bytes 
             }
         }
     }
-    if (adding) ProviderDialog(state, onDismiss = { adding = false; vm.clearProviderError() }) { type, key, model, base -> vm.addProvider(type, key, model, base) { adding = false } }
+    if (adding) ProviderDialog(state, vm, onDismiss = { adding = false; vm.clearProviderError(); vm.clearKeyCheck() }) { type, key, model, base -> vm.addProvider(type, key, model, base) { adding = false } }
     removing?.let { p -> ConfirmDialog("Remove ${p.name}?", if (p.provider == Catalog.LOCAL) "Chats using offline AI will ask you to pick another model. The downloaded model stays until you delete it on the Offline AI card." else "The encrypted key is deleted from this phone. Chats using it will ask you to pick another model.", "Remove", onDismiss = { removing = null }) { vm.removeProvider(p.id); removing = null } }
     rekeying?.let { p -> KeyDialog(p, onDismiss = { rekeying = null }) { key -> vm.replaceKey(p.id, key); rekeying = null } }
     choosing?.let { p -> DefaultModelDialog(p, state, vm, onDismiss = { choosing = null }) { vm.setDefaultModel(p.id, it); choosing = null } }
@@ -311,34 +311,68 @@ fun formatBytes(bytes: Long): String = when { bytes < 1024 -> "$bytes B"; bytes 
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedTextField(model, { model = it }, label = { Text("Model id") }, singleLine = true, modifier = Modifier.fillMaxWidth())
-                LazyColumn(Modifier.heightIn(max = 280.dp)) { items((if (model.isBlank() || model in options) options else options.filter { it.contains(model, true) }).take(150)) { option -> ListItem(headlineContent = { Text(option) }, leadingContent = { RadioButton(option == model, { model = option }) }, modifier = Modifier.clickable { model = option }) } }
+                state.modelErrors[provider.id]?.let { Text("Couldn't load the model list: $it", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
+                if (options.isEmpty() && state.modelErrors[provider.id] == null) Row(verticalAlignment = Alignment.CenterVertically) { CircularProgressIndicator(Modifier.size(14.dp), strokeWidth = 2.dp); Text("  Loading models…", style = MaterialTheme.typography.bodySmall) }
+                LazyColumn(Modifier.heightIn(max = 280.dp)) { items((if (model.isBlank() || model in options) options else options.filter { it.contains(model, true) }).take(150)) { option -> ListItem(headlineContent = { Text(option) }, leadingContent = { RadioButton(option == model, { model = option }) }, trailingContent = { if (option.endsWith(":free")) Text("FREE", color = MaterialTheme.colorScheme.secondary, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold) }, modifier = Modifier.clickable { model = option }) } }
             }
         })
 }
 
-@Composable private fun ProviderDialog(state: UiState, onDismiss: () -> Unit, save: (String, String, String, String) -> Unit) {
+@Composable private fun ProviderDialog(state: UiState, vm: ByakViewModel, onDismiss: () -> Unit, save: (String, String, String, String) -> Unit) {
     val catalog = state.catalog.filter { !it.localOnly }
     val types = catalog.map { it.id } + "custom"
     var type by remember { mutableStateOf(types.first()) }
     var key by remember { mutableStateOf("") }; var base by remember { mutableStateOf("") }
     var model by remember { mutableStateOf(catalog.firstOrNull()?.models?.firstOrNull().orEmpty()) }
+    var modelTouched by remember { mutableStateOf(false) }
     val suggestions = catalog.firstOrNull { it.id == type }?.models.orEmpty()
+    // Test the key as soon as it's pasted and load the models it can really use.
+    LaunchedEffect(type, key, base) {
+        if (key.trim().length >= 8 && (type != "custom" || base.startsWith("https://"))) { delay(700); vm.checkKey(type, key, base) } else vm.clearKeyCheck()
+    }
+    val check = state.keyCheck?.takeIf { it.key == key }
+    // Pick a model this key can run (a free one for a free-only key) unless the user already chose one that works.
+    LaunchedEffect(check?.suggested, check?.freeOnly) {
+        val result = check ?: return@LaunchedEffect
+        val suggested = result.suggested ?: return@LaunchedEffect
+        if (!modelTouched || model !in result.models || (result.freeOnly && !model.endsWith(":free"))) model = suggested
+    }
     AlertDialog(onDismissRequest = onDismiss, title = { Text("Connect provider") },
-        confirmButton = { Button(onClick = { save(type, key, model, base) }, enabled = !state.busy && key.isNotBlank() && model.isNotBlank() && (type != "custom" || base.startsWith("https://"))) { if (state.busy) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp) else Text("Test & save") } },
+        confirmButton = { Button(onClick = { save(type, key, model, base) }, enabled = !state.busy && key.isNotBlank() && model.isNotBlank() && (type != "custom" || base.startsWith("https://"))) { if (state.busy) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp) else Text("Save") } },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Text("Provider", style = MaterialTheme.typography.labelMedium)
-                FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) { types.forEach { id -> FilterChip(selected = type == id, onClick = { type = id; model = catalog.firstOrNull { it.id == id }?.models?.firstOrNull().orEmpty() }, label = { Text(catalog.firstOrNull { it.id == id }?.name ?: "Custom") }) } }
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) { types.forEach { id -> FilterChip(selected = type == id, onClick = { type = id; modelTouched = false; model = catalog.firstOrNull { it.id == id }?.models?.firstOrNull().orEmpty() }, label = { Text(catalog.firstOrNull { it.id == id }?.name ?: "Custom") }) } }
                 OutlinedTextField(key, { value -> key = value
                     // Pasting a key picks the matching provider, so a Gemini key is never sent to OpenAI.
-                    Catalog.detect(value)?.takeIf { it != type && it in types && !(it == "openai" && type in setOf("openrouter", "deepseek")) }?.let { guess -> type = guess; model = catalog.firstOrNull { it.id == guess }?.models?.firstOrNull().orEmpty() }
+                    Catalog.detect(value)?.takeIf { it != type && it in types && !(it == "openai" && type in setOf("openrouter", "deepseek")) }?.let { guess -> type = guess; modelTouched = false; model = catalog.firstOrNull { it.id == guess }?.models?.firstOrNull().orEmpty() }
                 }, label = { Text("API key") }, singleLine = true, visualTransformation = PasswordVisualTransformation())
-                state.providerError?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
-                OutlinedTextField(model, { model = it }, label = { Text("Default model") }, singleLine = true)
-                if (suggestions.isNotEmpty()) FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) { suggestions.forEach { s -> SuggestionChip(onClick = { model = s }, label = { Text(s) }) } }
                 if (type == "custom") OutlinedTextField(base, { base = it }, label = { Text("HTTPS endpoint (OpenAI-compatible)") }, singleLine = true, placeholder = { Text("https://example.com/v1") })
-                Text("The key is tested before it's saved, then encrypted on this phone. You can pick any model the provider offers later.", style = MaterialTheme.typography.bodySmall)
+                when {
+                    check == null -> Unit
+                    check.loading -> Row(verticalAlignment = Alignment.CenterVertically) { CircularProgressIndicator(Modifier.size(14.dp), strokeWidth = 2.dp); Text("  Checking key…", style = MaterialTheme.typography.bodySmall) }
+                    check.error != null -> Text(check.error, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+                    else -> {
+                        val free = check.models.count { it.endsWith(":free") }
+                        Text("✓ Key works · ${check.models.size} models" + if (free > 0) " ($free free)" else "", color = MaterialTheme.colorScheme.secondary, style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Bold)
+                        if (check.freeOnly) Text("This key has no credits, so it can only use FREE models. One is selected below.", style = MaterialTheme.typography.bodySmall)
+                    }
+                }
+                state.providerError?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
+                OutlinedTextField(model, { model = it; modelTouched = true }, label = { Text(if (check?.models.isNullOrEmpty()) "Default model" else "Model (type to search)") }, singleLine = true)
+                val live = check?.models.orEmpty()
+                if (live.isNotEmpty()) {
+                    val shown = (if (model.isBlank() || model in live) live else live.filter { it.contains(model, true) }).filter { check?.freeOnly != true || it.endsWith(":free") }.take(120)
+                    LazyColumn(Modifier.heightIn(max = 220.dp)) {
+                        items(shown) { option ->
+                            ListItem(headlineContent = { Text(option, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                                leadingContent = { RadioButton(option == model, { model = option; modelTouched = true }) },
+                                trailingContent = { if (option.endsWith(":free")) Text("FREE", color = MaterialTheme.colorScheme.secondary, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold) },
+                                modifier = Modifier.clickable { model = option; modelTouched = true })
+                        }
+                    }
+                } else if (suggestions.isNotEmpty()) FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) { suggestions.forEach { s -> SuggestionChip(onClick = { model = s; modelTouched = true }, label = { Text(s) }) } }
                 Text("Free keys: Google Gemini (aistudio.google.com), Groq (console.groq.com), OpenRouter free models (openrouter.ai), Pollinations (enter.pollinations.ai).", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         })
