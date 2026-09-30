@@ -53,6 +53,19 @@ import kotlinx.coroutines.withContext
                 }
             }
         }
+        // No AI yet: the free option is one tap away (no key, no account, no cost).
+        if (state.providers.none { it.enabled } && vm.offlineAvailable) item {
+            OutlinedCard(onClick = { vm.downloadLocalModel(); navigate(Destination.Models) }, shape = RoundedCornerShape(24.dp)) {
+                Row(Modifier.padding(20.dp).fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Outlined.PhoneAndroid, null, tint = MaterialTheme.colorScheme.primary); Spacer(Modifier.width(14.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text("Start free — no key needed", fontWeight = FontWeight.Bold)
+                        Text("Download the Offline AI once (${LocalModel.SIZE_LABEL}). Private, and works without internet.", style = MaterialTheme.typography.bodySmall)
+                    }
+                    Icon(Icons.Outlined.Download, null)
+                }
+            }
+        }
         item { Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) { Metric("Chats", state.conversations.size.toString(), Icons.Outlined.ChatBubbleOutline, Modifier.weight(1f)) { navigate(Destination.Chats) }; Metric("Projects", state.projects.size.toString(), Icons.Outlined.Workspaces, Modifier.weight(1f)) { navigate(Destination.Projects) }; Metric("Files", state.files.size.toString(), Icons.Outlined.Description, Modifier.weight(1f)) { navigate(Destination.Files) } } }
         if (state.conversations.isNotEmpty()) {
             item { Text("Recent chats", fontWeight = FontWeight.Bold, fontSize = 19.sp) }
