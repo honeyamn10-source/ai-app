@@ -106,13 +106,13 @@ class LocalApi(
         var verified = false
         if (!local) {
             // Test the key now, so a wrong key fails here instead of as a silent chat later.
-            val available = try { gateway.verify(Connection(type, entry?.name ?: "Custom provider", base, key)) }
+            val check = try { gateway.verify(Connection(type, entry?.name ?: "Custom provider", base, key)) }
             catch (e: ApiException) { if (e.status == 401 || e.status == 403 || (e.status == 400 && (e.message.orEmpty().contains("API key", true) || e.message.orEmpty().contains("API_KEY", true)))) throw ApiException("${entry?.name ?: "The provider"} rejected this API key. Check that you copied all of it.", 400) else null }
             catch (e: CancellationException) { throw e }
             catch (e: Exception) { null } // an unusual /models response doesn't block saving the key
-            if (!available.isNullOrEmpty()) {
+            if (check != null && check.models.isNotEmpty()) {
                 verified = true
-                if (chosen !in available) chosen = entry?.models?.firstOrNull { it in available } ?: available.firstOrNull { m -> listOf("chat", "instruct", "gpt", "claude", "gemini", "llama").any { m.contains(it, true) } } ?: chosen
+                chosen = pickModel(model.trim(), entry?.models.orEmpty(), check)
             }
         }
         return store.write { db -> db.insert("providers", JSONObject().put("provider", type).put("name", entry?.name ?: "Custom provider").put("baseUrl", if (type == "custom") base else "")
@@ -122,7 +122,10 @@ class LocalApi(
     override suspend fun updateProvider(id: String, defaultModel: String?, enabled: Boolean?, apiKey: String?): Provider {
         val key = apiKey?.let(Catalog::cleanKey)?.also { if (it.isBlank()) throw ApiException("Paste your API key", 400) }
         return store.write { db ->
-            (db.update("providers", id) { row -> defaultModel?.let { row.put("defaultModel", it) }; enabled?.let { row.put("enabled", it) }; key?.let { row.put("secret", vault.encrypt(it)).put("maskedKey", mask(it)).remove("lastValidatedAt") } } ?: throw ApiException("Not found", 404)).toProvider()
+            val oldDefault = db.find("providers", id)?.optString("defaultModel")
+            if (defaultModel != null && oldDefault != null) db.all("conversations").filter { it.optString("providerId") == id && it.optString("model") == oldDefault }.forEach { c -> db.update("conversations", c.getString("id")) { it.put("model", "") } }
+            val updated = db.update("providers", id) { row -> defaultModel?.let { row.put("defaultModel", it) }; enabled?.let { row.put("enabled", it) }; key?.let { row.put("secret", vault.encrypt(it)).put("maskedKey", mask(it)).remove("lastValidatedAt") } } ?: throw ApiException("Not found", 404)
+            updated.toProvider()
         }
     }
     /** The provider to use (by id, else the first enabled one) with its decrypted key. */
@@ -134,7 +137,11 @@ class LocalApi(
     }
     private suspend fun connection(id: String?): Connection = resolve(id).first
     override suspend fun validateProvider(id: String) { val c = connection(id); gateway.verify(c); store.write { db -> db.update("providers", id) { it.put("lastValidatedAt", Instant.now().toString()) } } }
-    override suspend fun providerModels(id: String): List<String> { val c = connection(id); return runCatching { gateway.listModels(c) }.getOrElse { Catalog.entry(c.provider)?.models ?: throw it } }
+    override suspend fun providerModels(id: String): List<String> {
+        val c = connection(id)
+        val models = runCatching { gateway.listModels(c) }.getOrElse { Catalog.entry(c.provider)?.models ?: throw it }
+        return if (c.provider == "openrouter") models.sortedBy { !it.endsWith(":free") } else models // free models first
+    }
     override suspend fun deleteProvider(id: String) { store.write { db -> db.remove("providers") { it.optString("id") == id }; db.all("conversations").filter { it.optString("providerId") == id }.forEach { c -> db.update("conversations", c.getString("id")) { it.remove("providerId") } } } }
 
     // ---------- conversations ----------
@@ -256,7 +263,7 @@ class LocalApi(
                 .put("citations", JSONArray(citations.map { JSONObject().put("id", it.id).put("title", it.title).put("chunk", it.chunk).put("kind", it.kind).put("url", it.url ?: "") })))
             db.update("conversations", conversationId) { conv ->
                 if (conv.optString("title") == "New conversation") conv.put("title", question.replace(Regex("\\s+"), " ").trim().let { if (it.length <= 60) it else it.take(57) + "…" }.ifBlank { "Photo question" })
-                conv.put("providerId", providerRow.optString("id")).put("model", model)
+                if (conv.optString("providerId") != providerRow.optString("id")) conv.put("providerId", providerRow.optString("id")).put("model", "")
             }
             if (input + output > 0) db.insert("usage", JSONObject().put("provider", c.provider).put("model", model).put("inputTokens", input).put("outputTokens", output))
             row.toMessage()
@@ -379,6 +386,22 @@ class LocalApi(
     private suspend fun withUsage(sub: Subscription): Subscription = store.read { db -> sub.copy(webSearchesToday = used(db, "webSearchesPerDay"), imagesToday = used(db, "imagesPerDay"), comparisonsToday = used(db, "comparisonsPerDay")) }
     override suspend fun verifyPurchases(tokens: List<String>): Subscription { tokens.forEach { runCatching { billing.acknowledge(it) } }; proCache = null; return subscription() }
     override suspend fun rememberPlanChoice(basePlanId: String) { store.write { db -> db.meta.put("planChoice", basePlanId) }; proCache = null }
+}
+
+/**
+ * The model to save for a newly verified key: what the user typed if the provider has it (also matching
+ * "gpt-4o" to "openai/gpt-4o"), otherwise a sensible default. Keys that can only run free models get a free one.
+ */
+fun pickModel(typed: String, suggested: List<String>, check: Gateway.KeyCheck): String {
+    val available = check.models
+    fun usable(m: String) = !check.freeOnly || m.endsWith(":free")
+    val exact = typed.takeIf { it.isNotBlank() }?.let { t -> available.firstOrNull { it == t } ?: available.firstOrNull { it.endsWith("/$t") || it.substringAfter('/') == t } }
+    if (exact != null && usable(exact)) return exact
+    if (check.freeOnly) {
+        val preferred = listOf("deepseek/deepseek-chat-v3-0324:free", "meta-llama/llama-3.3-70b-instruct:free", "qwen/qwen3-235b-a22b:free", "google/gemini-2.0-flash-exp:free", "mistralai/mistral-small-3.2-24b-instruct:free")
+        (exact?.let { "$it:free" }?.takeIf { it in available } ?: preferred.firstOrNull { it in available } ?: available.firstOrNull { it.endsWith(":free") })?.let { return it }
+    }
+    return suggested.firstOrNull { it in available && usable(it) } ?: available.firstOrNull { m -> usable(m) && listOf("chat", "instruct", "gpt", "claude", "gemini", "llama").any { m.contains(it, true) } } ?: typed.ifBlank { available.first() }
 }
 
 /** Starter prompt templates (same as the server's). */
