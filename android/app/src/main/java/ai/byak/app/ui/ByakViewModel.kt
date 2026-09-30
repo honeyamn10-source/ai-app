@@ -97,6 +97,11 @@ class ByakViewModel(private val api: ByakApi, private val billing: BillingManage
         finally { update { copy(busy = false) } }
     }
     fun clearProviderError() = update { copy(providerError = null) }
+    /** Replaces a saved key and tests it straight away. */
+    fun replaceKey(id: String, key: String) = task("New key works — you're ready to chat") {
+        try { api.updateProvider(id, apiKey = key); api.validateProvider(id) }
+        finally { val list = api.providers(); update { copy(providers = list) } }
+    }
     fun validateProvider(id: String) = task("Key works — you're ready to chat") { api.validateProvider(id); val list = api.providers(); update { copy(providers = list) } }
     fun removeProvider(id: String) = task("Provider removed") { api.deleteProvider(id); val list = api.providers(); update { copy(providers = list) } }
     fun setProviderEnabled(id: String, enabled: Boolean) = task { api.updateProvider(id, enabled = enabled); val list = api.providers(); update { copy(providers = list) } }

@@ -91,22 +91,23 @@ class LocalApi(
     override suspend fun providers(): List<Provider> = store.read { db -> db.all("providers").map { it.toProvider() } }
     private fun mask(key: String) = "••••••••${if (key.length > 8) key.takeLast(4) else ""}"
     override suspend fun addProvider(type: String, apiKey: String, model: String, baseUrl: String): Provider {
+        val key = Catalog.cleanKey(apiKey); val base = Catalog.cleanBaseUrl(baseUrl)
         val entry = Catalog.entry(type)
         if (entry == null && type != "custom") throw ApiException("Unsupported provider", 400)
         val local = type == Catalog.LOCAL
         if (local) providers().firstOrNull { it.provider == Catalog.LOCAL }?.let { existing -> return if (existing.enabled) existing else updateProvider(existing.id, null, true, null) }
-        if (apiKey.isBlank() && !local) throw ApiException("Paste your API key", 400)
-        if (type == "custom" && !baseUrl.startsWith("https://")) throw ApiException("Custom providers need an https:// endpoint", 400)
-        Catalog.detect(apiKey)?.takeIf { it != type && type != "custom" && !(it == "openai" && type in setOf("openrouter", "deepseek")) }?.let { guess ->
+        if (key.isBlank() && !local) throw ApiException("Paste your API key", 400)
+        if (type == "custom" && !base.startsWith("https://")) throw ApiException("Custom providers need an https:// endpoint", 400)
+        Catalog.detect(key)?.takeIf { it != type && type != "custom" && !(it == "openai" && type in setOf("openrouter", "deepseek")) }?.let { guess ->
             throw ApiException("This looks like a ${Catalog.entry(guess)?.name} key. Choose ${Catalog.entry(guess)?.name} as the provider.", 400)
         }
-        enforce("providers", providers().size)
+        enforce("providers", providers().count { it.provider != Catalog.LOCAL }) // the free offline AI never uses a provider slot
         var chosen = model.ifBlank { entry?.models?.firstOrNull().orEmpty() }
         var verified = false
         if (!local) {
             // Test the key now, so a wrong key fails here instead of as a silent chat later.
-            val available = try { gateway.listModels(Connection(type, entry?.name ?: "Custom provider", baseUrl, apiKey)) }
-            catch (e: ApiException) { if (e.status == 401 || e.status == 403) throw ApiException("${entry?.name ?: "The provider"} rejected this API key. Check that you copied all of it.", 400) else null }
+            val available = try { gateway.verify(Connection(type, entry?.name ?: "Custom provider", base, key)) }
+            catch (e: ApiException) { if (e.status == 401 || e.status == 403 || (e.status == 400 && (e.message.orEmpty().contains("API key", true) || e.message.orEmpty().contains("API_KEY", true)))) throw ApiException("${entry?.name ?: "The provider"} rejected this API key. Check that you copied all of it.", 400) else null }
             catch (e: CancellationException) { throw e }
             catch (e: Exception) { null } // an unusual /models response doesn't block saving the key
             if (!available.isNullOrEmpty()) {
@@ -114,12 +115,15 @@ class LocalApi(
                 if (chosen !in available) chosen = entry?.models?.firstOrNull { it in available } ?: available.firstOrNull { m -> listOf("chat", "instruct", "gpt", "claude", "gemini", "llama").any { m.contains(it, true) } } ?: chosen
             }
         }
-        return store.write { db -> db.insert("providers", JSONObject().put("provider", type).put("name", entry?.name ?: "Custom provider").put("baseUrl", if (type == "custom") baseUrl else "")
-            .put("defaultModel", chosen).put("enabled", true).put("maskedKey", if (local) "On this phone · no key" else mask(apiKey)).put("secret", if (local) "" else vault.encrypt(apiKey))
+        return store.write { db -> db.insert("providers", JSONObject().put("provider", type).put("name", entry?.name ?: "Custom provider").put("baseUrl", if (type == "custom") base else "")
+            .put("defaultModel", chosen).put("enabled", true).put("maskedKey", if (local) "On this phone · no key" else mask(key)).put("secret", if (local) "" else vault.encrypt(key))
             .apply { if (verified) put("lastValidatedAt", Instant.now().toString()) }).toProvider() }
     }
-    override suspend fun updateProvider(id: String, defaultModel: String?, enabled: Boolean?, apiKey: String?): Provider = store.write { db ->
-        (db.update("providers", id) { row -> defaultModel?.let { row.put("defaultModel", it) }; enabled?.let { row.put("enabled", it) }; apiKey?.let { row.put("secret", vault.encrypt(it)).put("maskedKey", mask(it)).remove("lastValidatedAt") } } ?: throw ApiException("Not found", 404)).toProvider()
+    override suspend fun updateProvider(id: String, defaultModel: String?, enabled: Boolean?, apiKey: String?): Provider {
+        val key = apiKey?.let(Catalog::cleanKey)?.also { if (it.isBlank()) throw ApiException("Paste your API key", 400) }
+        return store.write { db ->
+            (db.update("providers", id) { row -> defaultModel?.let { row.put("defaultModel", it) }; enabled?.let { row.put("enabled", it) }; key?.let { row.put("secret", vault.encrypt(it)).put("maskedKey", mask(it)).remove("lastValidatedAt") } } ?: throw ApiException("Not found", 404)).toProvider()
+        }
     }
     /** The provider to use (by id, else the first enabled one) with its decrypted key. */
     private suspend fun resolve(id: String?): Pair<Connection, JSONObject> {
@@ -129,7 +133,7 @@ class LocalApi(
         return Connection(row.getString("provider"), row.getString("name"), row.optString("baseUrl"), key) to row
     }
     private suspend fun connection(id: String?): Connection = resolve(id).first
-    override suspend fun validateProvider(id: String) { val c = connection(id); gateway.listModels(c); store.write { db -> db.update("providers", id) { it.put("lastValidatedAt", Instant.now().toString()) } } }
+    override suspend fun validateProvider(id: String) { val c = connection(id); gateway.verify(c); store.write { db -> db.update("providers", id) { it.put("lastValidatedAt", Instant.now().toString()) } } }
     override suspend fun providerModels(id: String): List<String> { val c = connection(id); return runCatching { gateway.listModels(c) }.getOrElse { Catalog.entry(c.provider)?.models ?: throw it } }
     override suspend fun deleteProvider(id: String) { store.write { db -> db.remove("providers") { it.optString("id") == id }; db.all("conversations").filter { it.optString("providerId") == id }.forEach { c -> db.update("conversations", c.getString("id")) { it.remove("providerId") } } } }
 
@@ -351,7 +355,7 @@ class LocalApi(
 
     // ---------- web search key (optional) ----------
     private suspend fun braveKey(): String? = store.read { db -> db.meta.optString("braveKey").ifBlank { null } }?.let { runCatching { vault.decrypt(it) }.getOrNull() }
-    suspend fun setBraveKey(key: String) { store.write { db -> if (key.isBlank()) db.meta.remove("braveKey") else db.meta.put("braveKey", vault.encrypt(key.trim())) } }
+    suspend fun setBraveKey(key: String) { store.write { db -> if (key.isBlank()) db.meta.remove("braveKey") else db.meta.put("braveKey", vault.encrypt(Catalog.cleanKey(key))) } }
     suspend fun hasBraveKey(): Boolean = store.read { db -> db.meta.optString("braveKey").isNotBlank() }
 
     // ---------- Pro via Google Play ----------

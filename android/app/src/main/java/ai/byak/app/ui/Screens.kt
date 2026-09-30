@@ -53,6 +53,19 @@ import kotlinx.coroutines.withContext
                 }
             }
         }
+        // No AI yet: the free option is one tap away (no key, no account, no cost).
+        if (state.providers.none { it.enabled } && vm.offlineAvailable) item {
+            OutlinedCard(onClick = { vm.downloadLocalModel(); navigate(Destination.Models) }, shape = RoundedCornerShape(24.dp)) {
+                Row(Modifier.padding(20.dp).fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Outlined.PhoneAndroid, null, tint = MaterialTheme.colorScheme.primary); Spacer(Modifier.width(14.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text("Start free — no key needed", fontWeight = FontWeight.Bold)
+                        Text("Download the Offline AI once (${LocalModel.SIZE_LABEL}). Private, and works without internet.", style = MaterialTheme.typography.bodySmall)
+                    }
+                    Icon(Icons.Outlined.Download, null)
+                }
+            }
+        }
         item { Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) { Metric("Chats", state.conversations.size.toString(), Icons.Outlined.ChatBubbleOutline, Modifier.weight(1f)) { navigate(Destination.Chats) }; Metric("Projects", state.projects.size.toString(), Icons.Outlined.Workspaces, Modifier.weight(1f)) { navigate(Destination.Projects) }; Metric("Files", state.files.size.toString(), Icons.Outlined.Description, Modifier.weight(1f)) { navigate(Destination.Files) } } }
         if (state.conversations.isNotEmpty()) {
             item { Text("Recent chats", fontWeight = FontWeight.Bold, fontSize = 19.sp) }
@@ -205,7 +218,7 @@ fun formatBytes(bytes: Long): String = when { bytes < 1024 -> "$bytes B"; bytes 
 
 // ---------- Models ----------
 @Composable fun ModelsScreen(state: UiState, vm: ByakViewModel) {
-    var adding by remember { mutableStateOf(false) }; var removing by remember { mutableStateOf<Provider?>(null) }; var choosing by remember { mutableStateOf<Provider?>(null) }
+    var adding by remember { mutableStateOf(false) }; var removing by remember { mutableStateOf<Provider?>(null) }; var choosing by remember { mutableStateOf<Provider?>(null) }; var rekeying by remember { mutableStateOf<Provider?>(null) }
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(20.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         item {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -223,11 +236,15 @@ fun formatBytes(bytes: Long): String = when { bytes < 1024 -> "$bytes B"; bytes 
                         Column(Modifier.weight(1f)) { Text(p.name, fontWeight = FontWeight.Bold); Text(p.maskedKey, style = MaterialTheme.typography.bodySmall) }
                         Switch(checked = p.enabled, onCheckedChange = { vm.setProviderEnabled(p.id, it) })
                     }
-                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 8.dp)) {
-                        AssistChip(onClick = { choosing = p }, label = { Text(p.defaultModel.ifBlank { "Choose default model" }, maxLines = 1, overflow = TextOverflow.Ellipsis) }, leadingIcon = { Icon(Icons.Outlined.Tune, null, Modifier.size(16.dp)) }, modifier = Modifier.weight(1f, fill = false))
+                    // Model on its own line, actions below, so nothing wraps on narrow phones.
+                    AssistChip(onClick = { choosing = p }, label = { Text(p.defaultModel.ifBlank { "Choose default model" }, maxLines = 1, overflow = TextOverflow.Ellipsis) }, leadingIcon = { Icon(Icons.Outlined.Tune, null, Modifier.size(16.dp)) }, modifier = Modifier.padding(top = 8.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                        if (p.lastValidatedAt != null) { Icon(Icons.Outlined.CheckCircle, "Verified", tint = MaterialTheme.colorScheme.secondary, modifier = Modifier.size(18.dp)); Text(" Verified", style = MaterialTheme.typography.labelSmall) }
                         Spacer(Modifier.weight(1f))
-                        if (p.lastValidatedAt != null) Icon(Icons.Outlined.CheckCircle, "Verified", tint = MaterialTheme.colorScheme.secondary, modifier = Modifier.size(18.dp))
-                        TextButton(onClick = { vm.validateProvider(p.id) }) { Text("Test key") }
+                        if (p.provider != Catalog.LOCAL) {
+                            TextButton(onClick = { vm.validateProvider(p.id) }) { Text("Test", maxLines = 1) }
+                            TextButton(onClick = { rekeying = p }) { Text("Change key", maxLines = 1) }
+                        }
                         IconButton(onClick = { removing = p }) { Icon(Icons.Outlined.Delete, "Remove") }
                     }
                 }
@@ -236,7 +253,19 @@ fun formatBytes(bytes: Long): String = when { bytes < 1024 -> "$bytes B"; bytes 
     }
     if (adding) ProviderDialog(state, onDismiss = { adding = false; vm.clearProviderError() }) { type, key, model, base -> vm.addProvider(type, key, model, base) { adding = false } }
     removing?.let { p -> ConfirmDialog("Remove ${p.name}?", if (p.provider == Catalog.LOCAL) "Chats using offline AI will ask you to pick another model. The downloaded model stays until you delete it on the Offline AI card." else "The encrypted key is deleted from this phone. Chats using it will ask you to pick another model.", "Remove", onDismiss = { removing = null }) { vm.removeProvider(p.id); removing = null } }
+    rekeying?.let { p -> KeyDialog(p, onDismiss = { rekeying = null }) { key -> vm.replaceKey(p.id, key); rekeying = null } }
     choosing?.let { p -> DefaultModelDialog(p, state, vm, onDismiss = { choosing = null }) { vm.setDefaultModel(p.id, it); choosing = null } }
+}
+
+@Composable private fun KeyDialog(provider: Provider, onDismiss: () -> Unit, save: (String) -> Unit) {
+    var key by remember { mutableStateOf("") }
+    AlertDialog(onDismissRequest = onDismiss, title = { Text("New key for ${provider.name}") },
+        text = { Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            OutlinedTextField(key, { key = it }, label = { Text("API key") }, singleLine = true, visualTransformation = PasswordVisualTransformation())
+            Text("It's tested right after saving. The old key is replaced.", style = MaterialTheme.typography.bodySmall)
+        } },
+        confirmButton = { Button(onClick = { save(key) }, enabled = key.isNotBlank()) { Text("Save & test") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } })
 }
 
 /** Download, use or delete the offline model (Qwen3 0.6B). Polls while a download runs. */

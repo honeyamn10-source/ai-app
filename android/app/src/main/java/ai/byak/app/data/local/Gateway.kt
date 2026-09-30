@@ -35,6 +35,10 @@ object Catalog {
     )
     const val LOCAL = "local"
     fun entry(id: String): Entry? = entries.firstOrNull { it.id == id }
+    /** Keys are often pasted with "Bearer ", quotes, spaces or a line break; none of those are ever part of a key. */
+    fun cleanKey(key: String): String = key.trim().removePrefix("Bearer ").removePrefix("bearer ").trim('"', '\'', ' ').filterNot { it.isWhitespace() }
+    /** Accepts a pasted full endpoint such as https://host/v1/chat/completions and keeps just the base URL. */
+    fun cleanBaseUrl(url: String): String = url.trim().trimEnd('/').removeSuffix("/chat/completions").removeSuffix("/completions").removeSuffix("/models").trimEnd('/')
     /** Guesses the provider from a pasted key's prefix, so a Gemini key never gets sent to OpenAI. */
     fun detect(key: String): String? = key.trim().let { k -> when {
         k.startsWith("sk-ant-") -> "anthropic"; k.startsWith("AIza") -> "gemini"; k.startsWith("sk-or-") -> "openrouter"
@@ -64,7 +68,14 @@ class Gateway(private val localModel: LocalModel? = null, private val client: Ok
     private fun failure(label: String, response: Response): ApiException {
         val body = runCatching { response.body?.string().orEmpty() }.getOrDefault("")
         val detail = runCatching { JSONObject(body).let { it.optJSONObject("error")?.optString("message") ?: it.optString("message") } }.getOrNull().orEmpty()
-        val hint = when (response.code) { 401, 403 -> "the provider rejected your API key"; 429 -> "rate limited or out of credit at the provider"; else -> "error ${response.code}" }
+        val hint = when {
+            response.code == 402 -> "your account at the provider is out of credit"
+            response.code == 429 -> "rate limited or out of credit at the provider — wait a moment and retry"
+            response.code == 401 || response.code == 403 || (response.code == 400 && detail.contains("API key", true)) -> "the provider rejected your API key (Models → Change key)"
+            response.code == 404 -> "this model isn't available with your key — pick another in Models"
+            response.code >= 500 -> "the provider is having problems (error ${response.code}) — try again shortly"
+            else -> "error ${response.code}"
+        }
         return ApiException("$label: $hint${if (detail.isNotBlank()) " — ${detail.take(300)}" else ""}", response.code)
     }
 
@@ -83,6 +94,12 @@ class Gateway(private val localModel: LocalModel? = null, private val client: Ok
             if (kind(c) == "gemini") data.optJSONArray("models").objects().filter { m -> m.optJSONArray("supportedGenerationMethods")?.let { a -> (0 until a.length()).any { a.getString(it) == "generateContent" } } == true }.map { it.optString("name").removePrefix("models/") }
             else (data.optJSONArray("data") ?: data.optJSONArray("models")).objects().map { it.optString("id").ifBlank { it.optString("name") } }.filter { it.isNotBlank() }.sorted()
         }.take(300)
+    }
+
+    /** Proves the key works. OpenRouter lists models without a key, so it is checked on its key endpoint instead. */
+    suspend fun verify(c: Connection): List<String> = withContext(Dispatchers.IO) {
+        if (c.provider == "openrouter") execute(quick, Request.Builder().url(base(c) + "/key").auth(c).get().build()).use { res -> if (!res.isSuccessful) throw failure(c.name, res) }
+        listModels(c)
     }
 
     /** Streams one answer; [onDelta] receives text as it arrives. Cancelling the coroutine cancels the HTTP call. */
