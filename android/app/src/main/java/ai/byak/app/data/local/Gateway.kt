@@ -98,14 +98,18 @@ class Gateway(private val localModel: LocalModel? = null, private val client: Ok
 
     suspend fun listModels(c: Connection): List<String> = withContext(Dispatchers.IO) {
         if (kind(c) == "local") return@withContext listOf(LocalModel.MODEL_ID)
-        val path = if (kind(c) == "gemini") "/models?pageSize=200" else "/models"
+        // Anthropic returns 20 models per page by default; ask for all of them.
+        val path = when (kind(c)) { "gemini" -> "/models?pageSize=200"; "anthropic" -> "/models?limit=1000"; else -> "/models" }
         execute(quick, Request.Builder().url(base(c) + path).auth(c).get().build()).use { res ->
             if (!res.isSuccessful) throw failure(c.name, res, isOpenRouter(c))
             val data = JSONObject(res.body?.string().orEmpty())
             if (kind(c) == "gemini") data.optJSONArray("models").objects().filter { m -> m.optJSONArray("supportedGenerationMethods")?.let { a -> (0 until a.length()).any { a.getString(it) == "generateContent" } } == true }.map { it.optString("name").removePrefix("models/") }
             else (data.optJSONArray("data") ?: data.optJSONArray("models")).objects().map { it.optString("id").ifBlank { it.optString("name") } }.filter { it.isNotBlank() }.sorted()
-        }.take(3000) // OpenRouter alone lists several hundred; cutting the list hid most of them
+        }.filter { chatCapable(it) }.take(3000) // OpenRouter lists ~460 models; only drop ones that can't chat
     }
+
+    /** Providers list embedding, speech, image and moderation models too; choosing one would make every chat fail. */
+    private fun chatCapable(id: String) = !id.endsWith(":batch") && !Regex("embed|whisper|(^|[/-])tts|dall-e|moderation|transcribe|realtime|(^|[/-])audio|image-gen|rerank|guard", RegexOption.IGNORE_CASE).containsMatchIn(id)
 
     /** What a key can use: its models, and whether it can only run free models (an OpenRouter key with no credits bought). */
     data class KeyCheck(val models: List<String>, val freeOnly: Boolean = false)

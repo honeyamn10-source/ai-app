@@ -464,14 +464,20 @@ class LocalApi(
  */
 fun pickModel(typed: String, suggested: List<String>, check: Gateway.KeyCheck): String {
     val available = check.models
+    // Never auto-pick a model that can't hold a conversation (safety classifiers, embedders, code-only, batch).
+    fun chatty(m: String) = !Regex("safety|guard|moderation|embed|rerank|code|:batch|tts|whisper", RegexOption.IGNORE_CASE).containsMatchIn(m)
     fun usable(m: String) = !check.freeOnly || m.endsWith(":free")
     val exact = typed.takeIf { it.isNotBlank() }?.let { t -> available.firstOrNull { it == t } ?: available.firstOrNull { it.endsWith("/$t") || it.substringAfter('/') == t } }
     if (exact != null && usable(exact)) return exact
     if (check.freeOnly) {
-        val preferred = listOf("deepseek/deepseek-chat-v3-0324:free", "meta-llama/llama-3.3-70b-instruct:free", "qwen/qwen3-235b-a22b:free", "google/gemini-2.0-flash-exp:free", "mistralai/mistral-small-3.2-24b-instruct:free")
-        (exact?.let { "$it:free" }?.takeIf { it in available } ?: preferred.firstOrNull { it in available } ?: available.firstOrNull { it.endsWith(":free") })?.let { return it }
+        // OpenRouter's free list changes often (checked live on 2026-09-30: 16 free models), so prefer model families, not exact ids.
+        val families = listOf("google/gemma", "qwen/", "nvidia/nemotron-3-super", "thinkingmachines/inkling", "nvidia/nemotron-3-ultra", "deepseek/", "meta-llama/", "mistralai/")
+        val free = available.filter { it.endsWith(":free") }
+        (exact?.let { "$it:free" }?.takeIf { it in available }
+            ?: families.firstNotNullOfOrNull { f -> free.filter { it.startsWith(f) && chatty(it) }.maxOrNull() }
+            ?: free.firstOrNull { chatty(it) } ?: free.firstOrNull())?.let { return it }
     }
-    return suggested.firstOrNull { it in available && usable(it) } ?: available.firstOrNull { m -> usable(m) && listOf("chat", "instruct", "gpt", "claude", "gemini", "llama").any { m.contains(it, true) } } ?: typed.ifBlank { available.first() }
+    return suggested.firstOrNull { it in available && usable(it) } ?: available.firstOrNull { m -> usable(m) && chatty(m) && listOf("chat", "instruct", "gpt", "claude", "gemini", "llama").any { m.contains(it, true) } } ?: typed.ifBlank { available.first() }
 }
 
 /** Starter prompt templates (same as the server's). */
