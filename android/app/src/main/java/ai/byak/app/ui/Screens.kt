@@ -205,7 +205,7 @@ fun formatBytes(bytes: Long): String = when { bytes < 1024 -> "$bytes B"; bytes 
 
 // ---------- Models ----------
 @Composable fun ModelsScreen(state: UiState, vm: ByakViewModel) {
-    var adding by remember { mutableStateOf(false) }; var removing by remember { mutableStateOf<Provider?>(null) }; var choosing by remember { mutableStateOf<Provider?>(null) }
+    var adding by remember { mutableStateOf(false) }; var removing by remember { mutableStateOf<Provider?>(null) }; var choosing by remember { mutableStateOf<Provider?>(null) }; var rekeying by remember { mutableStateOf<Provider?>(null) }
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(20.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         item {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -227,7 +227,10 @@ fun formatBytes(bytes: Long): String = when { bytes < 1024 -> "$bytes B"; bytes 
                         AssistChip(onClick = { choosing = p }, label = { Text(p.defaultModel.ifBlank { "Choose default model" }, maxLines = 1, overflow = TextOverflow.Ellipsis) }, leadingIcon = { Icon(Icons.Outlined.Tune, null, Modifier.size(16.dp)) }, modifier = Modifier.weight(1f, fill = false))
                         Spacer(Modifier.weight(1f))
                         if (p.lastValidatedAt != null) Icon(Icons.Outlined.CheckCircle, "Verified", tint = MaterialTheme.colorScheme.secondary, modifier = Modifier.size(18.dp))
-                        TextButton(onClick = { vm.validateProvider(p.id) }) { Text("Test key") }
+                        if (p.provider != Catalog.LOCAL) {
+                            TextButton(onClick = { vm.validateProvider(p.id) }) { Text("Test") }
+                            TextButton(onClick = { rekeying = p }) { Text("Change key") }
+                        }
                         IconButton(onClick = { removing = p }) { Icon(Icons.Outlined.Delete, "Remove") }
                     }
                 }
@@ -236,7 +239,19 @@ fun formatBytes(bytes: Long): String = when { bytes < 1024 -> "$bytes B"; bytes 
     }
     if (adding) ProviderDialog(state, onDismiss = { adding = false; vm.clearProviderError() }) { type, key, model, base -> vm.addProvider(type, key, model, base) { adding = false } }
     removing?.let { p -> ConfirmDialog("Remove ${p.name}?", if (p.provider == Catalog.LOCAL) "Chats using offline AI will ask you to pick another model. The downloaded model stays until you delete it on the Offline AI card." else "The encrypted key is deleted from this phone. Chats using it will ask you to pick another model.", "Remove", onDismiss = { removing = null }) { vm.removeProvider(p.id); removing = null } }
+    rekeying?.let { p -> KeyDialog(p, onDismiss = { rekeying = null }) { key -> vm.replaceKey(p.id, key); rekeying = null } }
     choosing?.let { p -> DefaultModelDialog(p, state, vm, onDismiss = { choosing = null }) { vm.setDefaultModel(p.id, it); choosing = null } }
+}
+
+@Composable private fun KeyDialog(provider: Provider, onDismiss: () -> Unit, save: (String) -> Unit) {
+    var key by remember { mutableStateOf("") }
+    AlertDialog(onDismissRequest = onDismiss, title = { Text("New key for ${provider.name}") },
+        text = { Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            OutlinedTextField(key, { key = it }, label = { Text("API key") }, singleLine = true, visualTransformation = PasswordVisualTransformation())
+            Text("It's tested right after saving. The old key is replaced.", style = MaterialTheme.typography.bodySmall)
+        } },
+        confirmButton = { Button(onClick = { save(key) }, enabled = key.isNotBlank()) { Text("Save & test") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } })
 }
 
 /** Download, use or delete the offline model (Qwen3 0.6B). Polls while a download runs. */

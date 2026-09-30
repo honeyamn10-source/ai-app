@@ -111,14 +111,27 @@ class LocalModel(private val context: Context) {
         private const val FREE_BYTES_NEEDED = 1_000_000_000L
         private const val MAX_PROMPT_CHARS = 6_000
 
-        /** A small model does best with a short, plain transcript. "/no_think" turns off Qwen3's slow reasoning mode. */
+        /**
+         * A small model does best with a short, plain prompt. Keeps the useful parts of the full system prompt
+         * (standing instructions, memory, document excerpts, web results) within a budget, then as many recent
+         * turns as fit. "/no_think" turns off Qwen3's slow reasoning mode.
+         */
         fun prompt(system: String, turns: List<Turn>): String {
-            val history = turns.takeLast(8).joinToString("\n\n") { t ->
+            // Split only where a known section starts, so multi-paragraph sections (several excerpts) stay whole.
+            val keep = listOf("The user's standing instructions", "Project \"", "Things the user asked you to remember", "Relevant excerpts", "Live web results")
+            val starts = keep + listOf("You are BYAK AI", "Retrieved documents", "Notes about web access")
+            val sections = system.split(Regex("\n\n(?=(" + starts.joinToString("|") { Regex.escape(it) } + "))"))
+            val context = sections.filter { part -> keep.any { part.startsWith(it) } }.joinToString("\n\n") { it.take(1_200) }.take(3_000)
+            val header = "You are BYAK AI, a helpful assistant running offline on the user's phone. Answer clearly and briefly." + if (context.isNotBlank()) "\n\n$context" else ""
+            val budget = (MAX_PROMPT_CHARS - header.length - 120).coerceAtLeast(1_000)
+            val lines = ArrayDeque<String>(); var used = 0
+            for (t in turns.asReversed().take(8)) {
                 val note = if (t.images.isNotEmpty()) " [a photo was attached; the offline AI can't see photos]" else ""
-                "${if (t.role == "assistant") "Assistant" else "User"}: ${t.content}$note"
+                val line = "${if (t.role == "assistant") "Assistant" else "User"}: ${t.content}$note"
+                if (used + line.length > budget) { if (lines.isEmpty()) lines.addFirst(line.takeLast(budget)); break }
+                lines.addFirst(line); used += line.length + 2
             }
-            val instructions = system.lineSequence().firstOrNull().orEmpty().ifBlank { "You are BYAK AI, a helpful assistant." }
-            return ("$instructions Answer the last user message clearly and briefly.\n\n$history\n\nAssistant:").takeLast(MAX_PROMPT_CHARS) + " /no_think"
+            return "$header\n\nConversation:\n${lines.joinToString("\n\n")}\n\nReply as the Assistant to the last User message. /no_think"
         }
     }
 }
