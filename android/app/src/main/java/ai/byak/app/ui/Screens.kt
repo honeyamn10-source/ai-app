@@ -223,13 +223,14 @@ fun formatBytes(bytes: Long): String = when { bytes < 1024 -> "$bytes B"; bytes 
                         Column(Modifier.weight(1f)) { Text(p.name, fontWeight = FontWeight.Bold); Text(p.maskedKey, style = MaterialTheme.typography.bodySmall) }
                         Switch(checked = p.enabled, onCheckedChange = { vm.setProviderEnabled(p.id, it) })
                     }
-                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 8.dp)) {
-                        AssistChip(onClick = { choosing = p }, label = { Text(p.defaultModel.ifBlank { "Choose default model" }, maxLines = 1, overflow = TextOverflow.Ellipsis) }, leadingIcon = { Icon(Icons.Outlined.Tune, null, Modifier.size(16.dp)) }, modifier = Modifier.weight(1f, fill = false))
+                    // Model on its own line, actions below, so nothing wraps on narrow phones.
+                    AssistChip(onClick = { choosing = p }, label = { Text(p.defaultModel.ifBlank { "Choose default model" }, maxLines = 1, overflow = TextOverflow.Ellipsis) }, leadingIcon = { Icon(Icons.Outlined.Tune, null, Modifier.size(16.dp)) }, modifier = Modifier.padding(top = 8.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                        if (p.lastValidatedAt != null) { Icon(Icons.Outlined.CheckCircle, "Verified", tint = MaterialTheme.colorScheme.secondary, modifier = Modifier.size(18.dp)); Text(" Verified", style = MaterialTheme.typography.labelSmall) }
                         Spacer(Modifier.weight(1f))
-                        if (p.lastValidatedAt != null) Icon(Icons.Outlined.CheckCircle, "Verified", tint = MaterialTheme.colorScheme.secondary, modifier = Modifier.size(18.dp))
                         if (p.provider != Catalog.LOCAL) {
-                            TextButton(onClick = { vm.validateProvider(p.id) }) { Text("Test") }
-                            TextButton(onClick = { rekeying = p }) { Text("Change key") }
+                            TextButton(onClick = { vm.validateProvider(p.id) }) { Text("Test", maxLines = 1) }
+                            TextButton(onClick = { rekeying = p }) { Text("Change key", maxLines = 1) }
                         }
                         IconButton(onClick = { removing = p }) { Icon(Icons.Outlined.Delete, "Remove") }
                     }
