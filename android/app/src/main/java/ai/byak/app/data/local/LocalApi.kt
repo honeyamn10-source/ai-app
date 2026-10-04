@@ -179,6 +179,14 @@ class LocalApi(
     /** The provider's real model list, free ones first. Errors are reported, never replaced by a few built-in names. */
     override suspend fun providerModels(id: String): List<String> = gateway.listModels(connection(id)).sortedBy { !it.endsWith(":free") }
 
+    /** Sends one real chat message through the same code a conversation uses and reports exactly what came back. */
+    suspend fun testChat(id: String): String {
+        val (c, row) = resolve(id)
+        val model = row.optString("defaultModel")
+        val result = gateway.stream(c, model, "You are BYAK AI, a helpful assistant.", listOf(Turn("user", "Reply with exactly: Hello from BYAK")), {})
+        return "${c.name} · $model answered:\n\n${result.text.take(400)}"
+    }
+
     /** Checks a key before it is saved (Connect screen): does it work, which models can it use, is it free-only. */
     suspend fun previewKey(type: String, apiKey: String, baseUrl: String): Pair<Gateway.KeyCheck, String> {
         val entry = Catalog.entry(type)
