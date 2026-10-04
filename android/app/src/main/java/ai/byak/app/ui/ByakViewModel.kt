@@ -36,8 +36,12 @@ data class UiState(
     // offline AI
     val localModel: LocalModelState? = null, val providerError: String? = null,
     // Connect screen: live check of the pasted key, and model-list errors per provider
-    val keyCheck: KeyCheckState? = null, val modelErrors: Map<String, String> = emptyMap()
+    val keyCheck: KeyCheckState? = null, val modelErrors: Map<String, String> = emptyMap(),
+    // Provider "Test": a real message and the exact reply or error, shown in a dialog the user can copy
+    val testResult: TestResult? = null
 )
+
+data class TestResult(val ok: Boolean, val text: String)
 
 /** Result of testing a pasted key before saving it. [suggested] is a model this key can actually use. */
 data class KeyCheckState(val key: String, val loading: Boolean, val models: List<String> = emptyList(), val freeOnly: Boolean = false, val suggested: String? = null, val error: String? = null)
@@ -111,6 +115,20 @@ class ByakViewModel(private val api: ByakApi, private val billing: BillingManage
         try { api.updateProvider(id, apiKey = key); api.validateProvider(id) }
         finally { val list = api.providers(); update { copy(providers = list) } }
     }
+    /** Checks the key, repairs the model if needed, then sends a real message and shows exactly what happened. */
+    fun testProvider(id: String) = viewModelScope.launch {
+        val local = api as? LocalApi
+        if (local == null) { validateProvider(id); return@launch }
+        update { copy(busy = true, testResult = null) }
+        val outcome = try {
+            runCatching { api.validateProvider(id) } // repairs a model that doesn't suit the key; a failure here is reported by the chat below
+            TestResult(true, local.testChat(id))
+        } catch (e: CancellationException) { throw e }
+        catch (e: Exception) { TestResult(false, (e.message ?: e.javaClass.simpleName) + "\n\nApp version ${ai.byak.app.BuildConfig.VERSION_NAME} (${ai.byak.app.BuildConfig.VERSION_CODE})") }
+        val list = runCatching { api.providers() }.getOrDefault(state.value.providers)
+        update { copy(busy = false, testResult = outcome, providers = list) }
+    }
+    fun dismissTestResult() = update { copy(testResult = null) }
     fun validateProvider(id: String) = task("Key works — you're ready to chat") { api.validateProvider(id); val list = api.providers(); update { copy(providers = list) } }
     fun removeProvider(id: String) = task("Provider removed") { api.deleteProvider(id); val list = api.providers(); update { copy(providers = list) } }
     fun setProviderEnabled(id: String, enabled: Boolean) = task { api.updateProvider(id, enabled = enabled); val list = api.providers(); update { copy(providers = list) } }

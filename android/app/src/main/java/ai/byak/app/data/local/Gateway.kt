@@ -97,10 +97,17 @@ class Gateway(private val localModel: LocalModel? = null, private val client: Ok
         return ApiException("$label: $hint${if (detail.isNotBlank()) " — ${detail.take(300)}" else ""}", response.code, when { gone -> MODEL_UNAVAILABLE; response.code == 402 && openRouter -> NO_CREDITS; response.code == 429 && openRouter && detail.contains("upstream", true) -> BUSY; else -> null })
     }
 
-    private suspend fun execute(http: OkHttpClient, request: Request): Response = withContext(Dispatchers.IO) {
+    /**
+     * Starts the call and returns as soon as headers arrive; the caller then reads the body.
+     * The call is cancelled only if the *caller's* coroutine is cancelled (the user tapped Stop). The handle used to be
+     * registered on this function's own withContext job, which completes the moment headers arrive, so every response
+     * body was cut off ("stream was reset: CANCEL"): streamed answers and large model lists never arrived.
+     */
+    private suspend fun execute(http: OkHttpClient, request: Request): Response {
         val call = http.newCall(request)
-        val handle = currentCoroutineContext()[Job]?.invokeOnCompletion { call.cancel() }
-        try { call.execute() } catch (e: IOException) { handle?.dispose(); currentCoroutineContext().ensureActive(); throw ApiException(if (e is java.net.SocketTimeoutException) "${request.url.host} took too long to respond. Try again." else "Couldn't reach ${request.url.host}. Check your internet connection.", 0) }
+        val handle = currentCoroutineContext()[Job]?.invokeOnCompletion { cause -> if (cause != null) call.cancel() }
+        return try { withContext(Dispatchers.IO) { call.execute() } }
+        catch (e: IOException) { handle?.dispose(); currentCoroutineContext().ensureActive(); throw ApiException(if (e is java.net.SocketTimeoutException) "${request.url.host} took too long to respond. Try again." else "Couldn't reach ${request.url.host}. Check your internet connection.", 0) }
     }
 
     suspend fun listModels(c: Connection): List<String> = withContext(Dispatchers.IO) {

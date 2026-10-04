@@ -15,6 +15,8 @@ import ai.byak.app.data.local.LocalModelState
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -247,10 +249,8 @@ fun formatBytes(bytes: Long): String = when { bytes < 1024 -> "$bytes B"; bytes 
                     Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
                         if (p.lastValidatedAt != null) { Icon(Icons.Outlined.CheckCircle, "Verified", tint = MaterialTheme.colorScheme.secondary, modifier = Modifier.size(18.dp)); Text(" Verified", style = MaterialTheme.typography.labelSmall) }
                         Spacer(Modifier.weight(1f))
-                        if (!Catalog.keyless(p.provider)) {
-                            TextButton(onClick = { vm.validateProvider(p.id) }) { Text("Test", maxLines = 1) }
-                            TextButton(onClick = { rekeying = p }) { Text("Change key", maxLines = 1) }
-                        }
+                        TextButton(onClick = { vm.testProvider(p.id) }, enabled = !state.busy) { Text("Test", maxLines = 1) }
+                        if (!Catalog.keyless(p.provider)) TextButton(onClick = { rekeying = p }) { Text("Change key", maxLines = 1) }
                         IconButton(onClick = { removing = p }) { Icon(Icons.Outlined.Delete, "Remove") }
                     }
                 }
@@ -259,6 +259,16 @@ fun formatBytes(bytes: Long): String = when { bytes < 1024 -> "$bytes B"; bytes 
     }
     if (adding) ProviderDialog(state, vm, onDismiss = { adding = false; vm.clearProviderError(); vm.clearKeyCheck() }) { type, key, model, base -> vm.addProvider(type, key, model, base) { adding = false } }
     removing?.let { p -> ConfirmDialog("Remove ${p.name}?", if (p.provider == Catalog.LOCAL) "Chats using offline AI will ask you to pick another model. The downloaded model stays until you delete it on the Offline AI card." else "The encrypted key is deleted from this phone. Chats using it will ask you to pick another model.", "Remove", onDismiss = { removing = null }) { vm.removeProvider(p.id); removing = null } }
+    state.testResult?.let { result ->
+        val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
+        AlertDialog(onDismissRequest = vm::dismissTestResult,
+            icon = { Icon(if (result.ok) Icons.Outlined.CheckCircle else Icons.Outlined.ErrorOutline, null, tint = if (result.ok) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.error) },
+            title = { Text(if (result.ok) "It works" else "Test failed") },
+            text = { Text(result.text, modifier = Modifier.heightIn(max = 360.dp).verticalScroll(rememberScrollState())) },
+            confirmButton = { Button(onClick = vm::dismissTestResult) { Text("OK") } },
+            dismissButton = { TextButton(onClick = { clipboard.setText(androidx.compose.ui.text.AnnotatedString(result.text)) }) { Text("Copy") } })
+    }
+    // Keyless built-ins (Offline AI, Pollinations Free) can be tested too.
     rekeying?.let { p -> KeyDialog(p, onDismiss = { rekeying = null }) { key -> vm.replaceKey(p.id, key); rekeying = null } }
     choosing?.let { p -> DefaultModelDialog(p, state, vm, onDismiss = { choosing = null }) { vm.setDefaultModel(p.id, it); choosing = null } }
 }
