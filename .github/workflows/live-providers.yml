@@ -1,0 +1,28 @@
+name: Live provider check
+
+# Runs the app's own networking code (Gateway) against live AI providers, so problems that only show up
+# against the real services are caught here instead of on a phone. Not part of required CI: it depends on
+# third-party services being up.
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'android/app/src/main/java/ai/byak/app/data/local/**'
+      - 'android/app/src/test/java/ai/byak/app/LiveProvidersTest.kt'
+      - '.github/workflows/live-providers.yml'
+
+jobs:
+  live:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: 17 }
+      - uses: gradle/actions/setup-gradle@v4
+        with: { gradle-version: '8.13' }
+      - name: Call Pollinations Free and OpenRouter with the app's Gateway
+        env:
+          BYAK_LIVE_TESTS: '1'
+          # Optional: a free OpenRouter key saved as a repository secret also exercises a real chat.
+          OPENROUTER_TEST_KEY: ${{ secrets.OPENROUTER_TEST_KEY }}
+        run: gradle -p android :app:testDebugUnitTest --tests 'ai.byak.app.LiveProvidersTest' -i 2>&1 | grep -E 'LiveProvidersTest|Pollinations|OpenRouter|Bad key|Key check|Free-only|answer|FAILED|PASSED|SKIPPED|Exception|expected' | head -80; exit ${PIPESTATUS[0]}
