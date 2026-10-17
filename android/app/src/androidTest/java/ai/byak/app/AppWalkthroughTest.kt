@@ -40,8 +40,12 @@ class AppWalkthroughTest {
     private fun text(t: String) = By.textContains(t)
     private fun problem(what: String) { problems += what; note("PROBLEM: $what") }
     /** Every text and label currently on screen, so a failure can be understood from the log alone. */
-    private fun screenText(): String = device.findObjects(By.pkg(instrumentation.targetContext.packageName))
-        .mapNotNull { o -> listOfNotNull(o.text, o.contentDescription).joinToString(" / ").takeIf { it.isNotBlank() } }.distinct().joinToString(" | ").take(3_000)
+    private fun screenText(): String = runCatching {
+        device.findObjects(By.pkg(instrumentation.targetContext.packageName))
+            // The screen can change while it's read (StaleObjectException): skip nodes that vanished.
+            .mapNotNull { o -> runCatching { listOfNotNull(o.text, o.contentDescription).joinToString(" / ") }.getOrNull()?.takeIf { it.isNotBlank() } }
+            .distinct().joinToString(" | ").take(3_000)
+    }.getOrElse { "(screen could not be read: ${it.javaClass.simpleName})" }
     private fun crashed(): Boolean = device.currentPackageName != instrumentation.targetContext.packageName
     private fun relaunchIfCrashed(where: String) {
         if (!crashed()) return
@@ -96,7 +100,10 @@ class AppWalkthroughTest {
             chatNow.click()
             val composer = find(By.clazz("android.widget.EditText"), 15_000)
             if (composer == null) problem("no chat composer after 'Chat now'") else {
-                composer.text = "Say hello in five words."
+                // Type like a person: focus the field, then real key input through the keyboard path.
+                composer.click(); Thread.sleep(800)
+                device.executeShellCommand("input text Say%shello%sin%sfive%swords.")
+                Thread.sleep(800)
                 shot("chat-typed")
                 note("after typing: ${screenText()}")
                 val send = find(By.desc("Send"), 5_000)
