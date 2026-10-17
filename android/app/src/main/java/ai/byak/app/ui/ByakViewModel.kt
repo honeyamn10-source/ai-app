@@ -281,9 +281,10 @@ class ByakViewModel(private val api: ByakApi, private val billing: BillingManage
         update { copy(messages = messages + prefix + pending, streaming = true, error = null) }
         generation = viewModelScope.launch {
             var answer = ""; var failure: String? = null
-            fun fail(message: String) { failure = message }
+            fun fail(message: String) { failure = message; android.util.Log.w("BYAK", "chat failed: $message") }
             try {
                 source().collect { event ->
+                    if (event !is StreamEvent.Delta) android.util.Log.i("BYAK", "chat event: ${event.javaClass.simpleName}")
                     when (event) {
                         is StreamEvent.Delta -> { answer += event.text; update { copy(messages = messages.dropLast(1) + pending.copy(content = answer), generationStatus = null) } }
                         is StreamEvent.Complete -> update { copy(messages = messages.dropLast(1) + event.message) }

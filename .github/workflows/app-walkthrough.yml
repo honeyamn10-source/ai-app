@@ -46,6 +46,7 @@ jobs:
           cat walkthrough/report.txt 2>/dev/null || echo "no report.txt (test did not reach the end)"
           echo "---- crash buffer ----"; cat walkthrough/crashes.txt 2>/dev/null | head -80
           echo "---- app errors in logcat ----"; grep -E "AndroidRuntime|FATAL|ai\.byak" walkthrough/logcat.txt 2>/dev/null | grep -E " E/| F/|FATAL|Exception" | head -80
+          echo "---- BYAK app log ----"; grep -E "BYAK|okhttp|SSL|UnknownHost|Cleartext" walkthrough/logcat.txt 2>/dev/null | head -60
       - uses: actions/upload-artifact@v4
         if: always()
         with:

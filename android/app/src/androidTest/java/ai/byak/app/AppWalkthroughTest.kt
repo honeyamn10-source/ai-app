@@ -39,6 +39,9 @@ class AppWalkthroughTest {
     private fun find(selector: BySelector, timeout: Long = 8_000): UiObject2? = device.wait(Until.findObject(selector), timeout)
     private fun text(t: String) = By.textContains(t)
     private fun problem(what: String) { problems += what; note("PROBLEM: $what") }
+    /** Every text and label currently on screen, so a failure can be understood from the log alone. */
+    private fun screenText(): String = device.findObjects(By.pkg(instrumentation.targetContext.packageName))
+        .mapNotNull { o -> listOfNotNull(o.text, o.contentDescription).joinToString(" / ").takeIf { it.isNotBlank() } }.distinct().joinToString(" | ").take(3_000)
     private fun crashed(): Boolean = device.currentPackageName != instrumentation.targetContext.packageName
     private fun relaunchIfCrashed(where: String) {
         if (!crashed()) return
@@ -48,7 +51,11 @@ class AppWalkthroughTest {
     private fun openFromDrawer(title: String) {
         val menu = find(By.desc("Menu"), 4_000) ?: return problem("no Menu button when opening $title")
         menu.click()
-        val item = find(By.text(title), 4_000) ?: return problem("drawer has no '$title'").also { device.pressBack() }
+        var item = find(By.text(title), 3_000)
+        // Lower entries need a scroll on small screens, as a person would do.
+        var swipes = 0
+        while (item == null && swipes++ < 4) { device.swipe(device.displayWidth / 4, device.displayHeight * 3 / 4, device.displayWidth / 4, device.displayHeight / 4, 20); item = find(By.text(title), 1_500) }
+        if (item == null) { problem("drawer has no '$title' (even after scrolling)"); device.pressBack(); return }
         item.click()
     }
 
@@ -99,6 +106,7 @@ class AppWalkthroughTest {
                     while (System.currentTimeMillis() - start < 120_000 && find(By.desc("Send"), 2_000) == null && !device.hasObject(text("No answer"))) Thread.sleep(1_000)
                     Thread.sleep(1_500)
                     shot("chat-answer")
+                    note("chat screen text: ${screenText()}")
                     if (device.hasObject(text("No answer"))) {
                         val reason = device.findObjects(By.textContains(":")).joinToString(" | ") { it.text ?: "" }.take(600)
                         problem("free chat failed: $reason")
