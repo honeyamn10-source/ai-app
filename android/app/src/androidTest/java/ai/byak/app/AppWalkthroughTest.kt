@@ -98,9 +98,13 @@ class AppWalkthroughTest {
             if (composer == null) problem("no chat composer after 'Chat now'") else {
                 composer.text = "Say hello in five words."
                 shot("chat-typed")
+                note("after typing: ${screenText()}")
                 val send = find(By.desc("Send"), 5_000)
                 if (send == null) problem("no Send button") else {
+                    note("Send enabled=${send.isEnabled}")
                     send.click()
+                    Thread.sleep(1_500)
+                    note("1.5 s after Send: ${screenText()}")
                     // Done when the Send button is back (Stop disappears) or an error bubble shows.
                     val start = System.currentTimeMillis()
                     while (System.currentTimeMillis() - start < 120_000 && find(By.desc("Send"), 2_000) == null && !device.hasObject(text("No answer"))) Thread.sleep(1_000)

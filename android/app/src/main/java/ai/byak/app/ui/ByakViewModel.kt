@@ -222,6 +222,7 @@ class ByakViewModel(private val api: ByakApi, private val billing: BillingManage
         conversation.model.takeIf { it.isNotBlank() && conversation.providerId == provider.id } ?: provider.defaultModel
 
     fun send(text: String) {
+        android.util.Log.i("BYAK", "send: ${text.length} chars, conversation=${state.value.activeConversation?.id}, providers=${state.value.providers.map { it.provider + if (it.enabled) "" else "(off)" }}, streaming=${generation?.isActive}")
         val conversation = state.value.activeConversation ?: return
         val provider = activeProvider(conversation) ?: run { update { copy(error = NO_PROVIDER) }; return }
         val model = modelFor(conversation, provider); val web = state.value.webSearch
@@ -276,7 +277,8 @@ class ByakViewModel(private val api: ByakApi, private val billing: BillingManage
     }
 
     private fun streamInto(conversation: Conversation, prefix: List<ChatMessage>, source: () -> Flow<StreamEvent>) {
-        if (generation?.isActive == true) return
+        if (generation?.isActive == true) { android.util.Log.w("BYAK", "send ignored: an answer is still being generated"); return }
+        android.util.Log.i("BYAK", "streaming into ${conversation.id}")
         val pending = ChatMessage("local-assistant", "assistant", "", pending = true)
         update { copy(messages = messages + prefix + pending, streaming = true, error = null) }
         generation = viewModelScope.launch {
