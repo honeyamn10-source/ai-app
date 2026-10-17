@@ -109,7 +109,8 @@ fun Context.findActivity(): Activity? = when (this) { is Activity -> this; is Co
                     val inChat = destination == Destination.Chats && state.activeConversation != null
                     if (!wide && !inChat) NavigationBar { bottomTabs.forEach { item -> NavigationBarItem(selected = destination == item, onClick = { destination = item }, icon = { Icon(item.icon, item.title) }, label = { Text(item.title) }) } }
                 },
-                snackbarHost = { SnackbarHost(snackbar) }
+                // In a chat there is no bottom bar, so lift messages above the composer instead of covering the Send button.
+                snackbarHost = { SnackbarHost(snackbar, Modifier.padding(bottom = if (destination == Destination.Chats && state.activeConversation != null) 96.dp else 0.dp).imePadding()) }
             ) { padding ->
                 Row(Modifier.padding(padding).consumeWindowInsets(padding).fillMaxSize()) {
                     if (wide) NavigationRail(header = { Surface(Modifier.padding(12.dp), color = MaterialTheme.colorScheme.primary, shape = RoundedCornerShape(14.dp)) { Icon(Icons.Outlined.AutoAwesome, null, Modifier.padding(10.dp), tint = Color.White) } }) {

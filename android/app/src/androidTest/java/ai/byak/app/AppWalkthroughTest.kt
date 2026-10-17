@@ -102,6 +102,7 @@ class AppWalkthroughTest {
             if (composer == null) problem("no chat composer after 'Chat now'") else {
                 // Type like a person: focus the field, then real key input through the keyboard path.
                 composer.click(); Thread.sleep(800)
+                device.wait(Until.gone(text("connected")), 8_000) // let the "connected" notice clear first
                 device.executeShellCommand("input text Say%shello%sin%sfive%swords.")
                 Thread.sleep(800)
                 shot("chat-typed")
