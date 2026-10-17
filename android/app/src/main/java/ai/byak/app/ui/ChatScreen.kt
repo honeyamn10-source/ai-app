@@ -186,7 +186,7 @@ import kotlinx.coroutines.launch
                     Spacer(Modifier.width(8.dp))
                     val canSend = draft.isNotBlank() || (state.drafts.isNotEmpty() && state.editing == null)
                     if (state.streaming) FilledTonalIconButton(onClick = vm::stopGeneration) { Icon(Icons.Outlined.Stop, "Stop generating") }
-                    else FilledIconButton(onClick = { val value = draft.trim(); if (canSend) { draft = ""; vm.send(value) } }, enabled = canSend) { Icon(Icons.AutoMirrored.Outlined.Send, "Send") }
+                    else FilledIconButton(onClick = { val value = draft.trim(); android.util.Log.i("BYAK", "Send tapped: ${value.length} chars, canSend=$canSend"); if (canSend) { draft = ""; vm.send(value) } }, enabled = canSend) { Icon(Icons.AutoMirrored.Outlined.Send, "Send") }
                 }
             }
         }

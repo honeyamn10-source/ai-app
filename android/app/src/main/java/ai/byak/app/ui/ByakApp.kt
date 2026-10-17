@@ -10,6 +10,8 @@ import ai.byak.app.data.Session
 import ai.byak.app.data.SessionStore
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -107,7 +109,8 @@ fun Context.findActivity(): Activity? = when (this) { is Activity -> this; is Co
                     val inChat = destination == Destination.Chats && state.activeConversation != null
                     if (!wide && !inChat) NavigationBar { bottomTabs.forEach { item -> NavigationBarItem(selected = destination == item, onClick = { destination = item }, icon = { Icon(item.icon, item.title) }, label = { Text(item.title) }) } }
                 },
-                snackbarHost = { SnackbarHost(snackbar) }
+                // In a chat there is no bottom bar, so lift messages above the composer instead of covering the Send button.
+                snackbarHost = { SnackbarHost(snackbar, Modifier.padding(bottom = if (destination == Destination.Chats && state.activeConversation != null) 96.dp else 0.dp).imePadding()) }
             ) { padding ->
                 Row(Modifier.padding(padding).consumeWindowInsets(padding).fillMaxSize()) {
                     if (wide) NavigationRail(header = { Surface(Modifier.padding(12.dp), color = MaterialTheme.colorScheme.primary, shape = RoundedCornerShape(14.dp)) { Icon(Icons.Outlined.AutoAwesome, null, Modifier.padding(10.dp), tint = Color.White) } }) {
@@ -137,7 +140,8 @@ fun Context.findActivity(): Activity? = when (this) { is Activity -> this; is Co
 }
 
 @Composable private fun DrawerContent(session: Session, pro: Boolean, selected: Destination, local: Boolean, navigate: (Destination) -> Unit) {
-    Column(Modifier.padding(horizontal = 12.dp, vertical = 20.dp)) {
+    // Scrollable: with 12+ entries the last ones (Memory, Usage, Settings) were cut off on smaller phones.
+    Column(Modifier.verticalScroll(rememberScrollState()).padding(horizontal = 12.dp, vertical = 20.dp)) {
         Text("BYAK AI", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black, modifier = Modifier.padding(horizontal = 16.dp))
         Text("${session.name} · ${if (pro) "Pro" else "Free"}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp))
         Spacer(Modifier.height(12.dp))
